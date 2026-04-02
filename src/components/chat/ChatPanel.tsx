@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
 import type { LooseEnd } from "@/lib/types";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -154,10 +155,20 @@ export default function ChatPanel() {
                 >
                   {message.parts.map((part, i) => {
                     if (part.type === "text") {
+                      if (isUser) {
+                        return (
+                          <span key={i} className="whitespace-pre-wrap">
+                            {part.text}
+                          </span>
+                        );
+                      }
                       return (
-                        <span key={i} className="whitespace-pre-wrap">
-                          {part.text}
-                        </span>
+                        <div
+                          key={i}
+                          className="prose prose-invert prose-sm max-w-none"
+                        >
+                          <ReactMarkdown>{part.text}</ReactMarkdown>
+                        </div>
                       );
                     }
                     if (part.type === "dynamic-tool") {

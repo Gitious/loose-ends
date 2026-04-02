@@ -1,6 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface AccountCard {
   id: string;
@@ -38,7 +40,7 @@ const accounts: AccountCard[] = [
         />
       </svg>
     ),
-    connectUrl: "/auth/connect?connection=google-oauth2&scopes=openid&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.events&returnTo=/settings",
+    connectUrl: "/auth/connect?connection=google-oauth2&scopes=openid&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.readonly&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar.events&returnTo=/settings%3Fconnected%3Dgoogle",
   },
   {
     id: "github",
@@ -51,11 +53,83 @@ const accounts: AccountCard[] = [
         <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
       </svg>
     ),
-    connectUrl: "/auth/connect?connection=github&scopes=repo&scopes=read%3Auser&returnTo=/settings",
+    connectUrl: "/auth/connect?connection=github&scopes=repo&scopes=read%3Auser&returnTo=/settings%3Fconnected%3Dgithub",
   },
 ];
 
+const STORAGE_KEY = "le-connected-accounts";
+
+function getConnectedAccounts(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setConnectedAccount(id: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getConnectedAccounts();
+    current[id] = true;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+  } catch {
+    // localStorage unavailable
+  }
+}
+
 export default function ConnectedAccounts() {
+  const searchParams = useSearchParams();
+  const [connectedMap, setConnectedMap] = useState<Record<string, boolean>>({});
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  // On mount, check URL params and localStorage
+  useEffect(() => {
+    const stored = getConnectedAccounts();
+
+    // Check if we just came back from a connect redirect
+    const justConnected = searchParams.get("connected");
+    if (justConnected) {
+      setConnectedAccount(justConnected);
+      stored[justConnected] = true;
+
+      // Clean the URL without triggering a navigation
+      const url = new URL(window.location.href);
+      url.searchParams.delete("connected");
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    // Check if there was an error from the connect flow
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setConnectError(
+        "Connection failed. The service may not be configured for account linking yet. Please try again later."
+      );
+      const url = new URL(window.location.href);
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_description");
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    setConnectedMap(stored);
+  }, [searchParams]);
+
+  function handleConnect(account: AccountCard) {
+    // For GitHub, wrap in try-catch and show helpful message if needed
+    if (account.id === "github") {
+      // Open in same window; if Auth0 fails, user will see the error page
+      // We set a flag so when they come back we can detect failure
+      try {
+        sessionStorage.setItem("le-connecting", account.id);
+      } catch {
+        // sessionStorage unavailable
+      }
+    }
+    window.location.href = account.connectUrl;
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -63,35 +137,75 @@ export default function ConnectedAccounts() {
       transition={{ delay: 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
     >
       <h2 className="text-xl font-semibold mb-6">Connected Accounts</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {accounts.map((account, i) => (
-          <motion.div
-            key={account.id}
-            className="glass group rounded-2xl p-6 flex flex-col gap-4 transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(232,168,73,0.06)]"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 + i * 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+
+      {connectError && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 flex items-center gap-2 rounded-xl border border-le-red/30 bg-le-red/10 px-4 py-3 text-sm text-le-red"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 shrink-0">
+            <path
+              fillRule="evenodd"
+              d="M8 15A7 7 0 108 1a7 7 0 000 14zM7.25 5a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.75a.75.75 0 100-1.5.75.75 0 000 1.5z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>{connectError}</span>
+          <button
+            onClick={() => setConnectError(null)}
+            className="ml-auto text-le-red/70 hover:text-le-red transition-colors"
+            aria-label="Dismiss"
           >
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-le-elevated">
-                {account.icon}
-              </div>
-              <div>
-                <h3 className="text-base font-semibold">{account.name}</h3>
-                <span className="text-[11px] text-le-muted">Not connected</span>
-              </div>
-            </div>
-            <p className="text-sm text-le-muted leading-relaxed">
-              {account.description}
-            </p>
-            <a
-              href={account.connectUrl}
-              className="mt-auto inline-flex items-center justify-center h-10 px-5 rounded-xl bg-le-accent text-le-void text-sm font-semibold transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_0_24px_rgba(232,168,73,0.3)] active:scale-[0.98]"
+            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+              <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+            </svg>
+          </button>
+        </motion.div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {accounts.map((account, i) => {
+          const isConnected = connectedMap[account.id] === true;
+
+          return (
+            <motion.div
+              key={account.id}
+              className="glass group rounded-2xl p-6 flex flex-col gap-4 transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(232,168,73,0.06)]"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 + i * 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
             >
-              Connect {account.name}
-            </a>
-          </motion.div>
-        ))}
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-le-elevated">
+                  {account.icon}
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">{account.name}</h3>
+                  {isConnected ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-le-green">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-le-green" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-le-muted">
+                      Click to connect or refresh access
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-le-muted leading-relaxed">
+                {account.description}
+              </p>
+              <button
+                onClick={() => handleConnect(account)}
+                className="mt-auto inline-flex items-center justify-center h-10 px-5 rounded-xl bg-le-accent text-le-void text-sm font-semibold transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_0_24px_rgba(232,168,73,0.3)] active:scale-[0.98]"
+              >
+                {isConnected ? `Reconnect ${account.name}` : `Connect ${account.name}`}
+              </button>
+            </motion.div>
+          );
+        })}
       </div>
     </motion.div>
   );

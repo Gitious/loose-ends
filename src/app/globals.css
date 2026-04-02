@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --color-le-void: #0a0908;
@@ -95,4 +96,63 @@ html {
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Prose (markdown) overrides for dark theme ── */
+.prose.prose-invert {
+  --tw-prose-body: var(--le-text);
+  --tw-prose-headings: var(--le-text);
+  --tw-prose-bold: var(--le-text);
+  --tw-prose-links: var(--le-accent);
+  --tw-prose-code: var(--le-accent);
+  --tw-prose-counters: var(--le-muted);
+  --tw-prose-bullets: var(--le-muted);
+  --tw-prose-hr: var(--le-border);
+}
+
+.prose.prose-invert p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-invert p:first-child {
+  margin-top: 0;
+}
+
+.prose.prose-invert p:last-child {
+  margin-bottom: 0;
+}
+
+.prose.prose-invert code {
+  background: rgba(232, 168, 73, 0.1);
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+
+.prose.prose-invert code::before,
+.prose.prose-invert code::after {
+  content: none;
+}
+
+.prose.prose-invert pre {
+  background: rgba(10, 9, 8, 0.6);
+  border: 1px solid var(--le-border);
+  border-radius: 0.5rem;
+}
+
+.prose.prose-invert a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose.prose-invert ul,
+.prose.prose-invert ol {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-invert blockquote {
+  border-left-color: var(--le-accent);
+  color: var(--le-muted);
 }

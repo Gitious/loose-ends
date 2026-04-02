@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Nav from "@/components/ui/Nav";
 import ConnectedAccounts from "@/components/settings/ConnectedAccounts";
 import { motion } from "framer-motion";
@@ -23,7 +24,9 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* Connected Accounts */}
-        <ConnectedAccounts />
+        <Suspense fallback={<div className="text-le-muted text-sm">Loading connected accounts...</div>}>
+          <ConnectedAccounts />
+        </Suspense>
 
         {/* About / Token Vault */}
         <motion.section
