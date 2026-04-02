@@ -136,6 +136,20 @@ Client (useChat hook)     POST /api/chat              Claude (claude-sonnet-4)
 
 Note: The client uses `useChat()` from `@ai-sdk/react` which renders tool invocations as `dynamic-tool` message parts. The `ChatPanel` component detects these parts and renders `ToolResultCard` components inline, showing a pulsing indicator while tools execute and a checkmark with item count when complete.
 
+## Security Model
+
+Loose Ends enforces defense-in-depth across every layer:
+
+| Threat | Mitigation |
+|--------|-----------|
+| Token leakage to browser | OAuth tokens exist only in Token Vault. `getAccessTokenFromTokenVault()` runs server-side in API routes. Client code never receives or stores tokens. |
+| AI agent acting without consent | All write actions (send email, merge PR) require CIBA phone approval via Auth0 Guardian on a separate device. In-app confirmation is insufficient because the AI could bypass it. |
+| Session hijacking | Auth0 session stored in encrypted, HTTP-only, same-site cookie. No client-accessible session tokens. |
+| Scope creep | OAuth scopes follow least-privilege: `gmail.readonly` for scanning, `gmail.send` only for CIBA-gated write actions. |
+| Expired tokens | Token Vault handles refresh transparently. The app never caches tokens -- it requests them on-demand for each API call. |
+| Unauthorized route access | `src/middleware.ts` intercepts all requests to `/dashboard` and `/settings`, redirecting to Auth0 login if no session exists. |
+| Unlimited AI tool chaining | `stopWhen: stepCountIs(5)` prevents the AI from entering unbounded tool-call loops. |
+
 ## Key Technical Decisions
 
 ### 1. Auth0 Token Vault over direct OAuth
