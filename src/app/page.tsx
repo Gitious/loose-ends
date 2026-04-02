@@ -211,7 +211,7 @@ export default function Home() {
           custom={3}
         >
           <a
-            href="/auth/login"
+            href="/auth/login?returnTo=/dashboard"
             className="group inline-flex items-center justify-center h-12 px-8 rounded-xl bg-le-accent text-le-void font-semibold text-sm tracking-wide transition-all duration-200 hover:scale-[1.03] hover:shadow-[0_0_32px_rgba(232,168,73,0.4)] active:scale-[0.98]"
           >
             Get Started
