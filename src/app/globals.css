@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+@theme {
+  --color-le-void: #08080c;
+  --color-le-surface: #111118;
+  --color-le-elevated: #1a1a24;
+  --color-le-border: #2a2a3a;
+  --color-le-text: #e4e0d8;
+  --color-le-muted: #7a7680;
+  --color-le-accent: #6c8cff;
+  --color-le-accent-glow: #4a6cff;
+  --color-le-red: #ff4c4c;
+  --color-le-yellow: #f0b429;
+  --color-le-green: #34d399;
+}
+
 :root {
   --le-void: #08080c;
   --le-surface: #111118;

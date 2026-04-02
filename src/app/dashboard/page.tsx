@@ -4,7 +4,7 @@ import ChatPanel from "@/components/chat/ChatPanel";
 
 export default async function DashboardPage() {
   const session = await getSession();
-  if (!session) redirect("/auth/login");
+  if (!session) redirect("/api/auth/login");
 
   const user = session.user;
   const firstName =

@@ -35,8 +35,8 @@ Be concise and direct. When presenting loose ends, use this format:
 Always scan all connected services when asked to find loose ends.`,
     messages,
     tools: { scanGmail, scanCalendar, scanGitHub },
-    maxSteps: 5,
+    stopWhen: stepCountIs(5),
   });
 
-  return result.toDataStreamResponse();
+  return result.toUIMessageStreamResponse();
 }
