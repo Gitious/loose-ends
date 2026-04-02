@@ -1,11 +1,9 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useInterruptions } from "@auth0/ai-vercel/react";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { LooseEnd } from "@/lib/types";
-import { TokenVaultInterruptHandler } from "@/components/TokenVaultInterruptHandler";
 
 const TOOL_LABELS: Record<string, string> = {
   scanGmail: "Scanning Gmail",
@@ -94,20 +92,7 @@ function AgentAvatar() {
 }
 
 export default function ChatPanel() {
-  const chat = useInterruptions((errorHandler) =>
-    useChat({
-      onError: errorHandler(() => {
-        // user-level error handling is done via the error banner below
-      }),
-    })
-  );
-
-  const { messages, sendMessage, status, error, stop } = chat as typeof chat & {
-    sendMessage: ReturnType<typeof useChat>["sendMessage"];
-    status: ReturnType<typeof useChat>["status"];
-    error: ReturnType<typeof useChat>["error"];
-    stop: ReturnType<typeof useChat>["stop"];
-  };
+  const { messages, sendMessage, status, error, stop } = useChat();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -226,13 +211,7 @@ export default function ChatPanel() {
           })}
         </AnimatePresence>
 
-        {/* TokenVault interrupt handler */}
-        <TokenVaultInterruptHandler
-          interrupt={chat.toolInterrupt}
-          onFinish={() => {
-            // Re-send last message to retry after authorization
-          }}
-        />
+        {/* TokenVault interrupt handler - will be re-enabled when withInterruptions is added back */}
 
         {/* Loading indicator */}
         {isLoading &&
