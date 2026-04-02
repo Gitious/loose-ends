@@ -73,7 +73,7 @@ export default function Nav() {
         })}
         <span className="mx-2 h-4 w-px bg-le-border/60" />
         <a
-          href="/api/auth/logout"
+          href="/auth/logout"
           className="rounded-lg px-3 py-1.5 text-sm text-le-muted transition-colors duration-150 hover:text-le-red hover:bg-le-red/5"
         >
           Logout

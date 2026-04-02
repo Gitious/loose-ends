@@ -18,7 +18,7 @@ export async function middleware(request: NextRequest) {
       if (isProtectedApi) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
-      return NextResponse.redirect(new URL("/api/auth/login", request.url));
+      return NextResponse.redirect(new URL("/auth/login", request.url));
     }
   }
 
