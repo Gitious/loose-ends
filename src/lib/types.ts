@@ -12,11 +12,16 @@ export interface LooseEnd {
   meta: Record<string, string>;
 }
 
-export interface AuditEntry {
-  id: string;
-  timestamp: Date;
-  action: string;
-  service: "gmail" | "calendar" | "github";
-  status: "pending" | "approved" | "denied" | "completed" | "failed";
-  details: string;
+// -- Shared urgency / age helpers used by tool scanners --
+
+export function getUrgencyByAge(daysOld: number): UrgencyLevel {
+  if (daysOld > 7) return "red";
+  if (daysOld > 3) return "yellow";
+  return "green";
+}
+
+export function formatAge(daysOld: number): string {
+  if (daysOld === 0) return "today";
+  if (daysOld === 1) return "1 day ago";
+  return `${daysOld} days ago`;
 }

@@ -28,14 +28,71 @@
   --le-green: #34d399;
 }
 
+/* ── Base ── */
 body {
   background: var(--le-void);
   color: var(--le-text);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
 }
 
+/* ── Noise texture overlay ── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ── Glass panels ── */
 .glass {
-  background: rgba(17, 17, 24, 0.6);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(42, 42, 58, 0.4);
+  background: rgba(17, 17, 24, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(42, 42, 58, 0.45);
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.03) inset,
+    0 2px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(122, 118, 128, 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(122, 118, 128, 0.5);
+}
+
+/* ── Focus ring default ── */
+*:focus-visible {
+  outline: 2px solid rgba(108, 140, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* ── Selection color ── */
+::selection {
+  background: rgba(108, 140, 255, 0.3);
+  color: #e4e0d8;
+}
+
+/* ── Smooth scrolling ── */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Subtle text rendering ── */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

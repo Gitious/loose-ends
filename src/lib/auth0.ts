@@ -10,16 +10,3 @@ export const auth0 = new Auth0Client({
 export async function getSession() {
   return auth0.getSession();
 }
-
-export async function getAccessToken() {
-  const tokenResult = await auth0.getAccessToken();
-  if (!tokenResult?.token) {
-    throw new Error("No access token available");
-  }
-  return tokenResult.token;
-}
-
-export async function getUser() {
-  const session = await auth0.getSession();
-  return session?.user ?? null;
-}

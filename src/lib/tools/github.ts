@@ -2,21 +2,10 @@ import { tool } from "ai";
 import { z } from "zod";
 import { getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
 import { withGitHubAccess } from "@/lib/auth0-ai";
-import type { LooseEnd, UrgencyLevel } from "@/lib/types";
+import { getUrgencyByAge, formatAge } from "@/lib/types";
+import type { LooseEnd } from "@/lib/types";
 
 const GITHUB_API = "https://api.github.com";
-
-function getUrgencyByAge(daysOld: number): UrgencyLevel {
-  if (daysOld > 7) return "red";
-  if (daysOld > 3) return "yellow";
-  return "green";
-}
-
-function formatAge(daysOld: number): string {
-  if (daysOld === 0) return "today";
-  if (daysOld === 1) return "1 day ago";
-  return `${daysOld} days ago`;
-}
 
 async function githubFetch(path: string, token: string) {
   const res = await fetch(`${GITHUB_API}${path}`, {
@@ -28,7 +17,8 @@ async function githubFetch(path: string, token: string) {
   });
 
   if (!res.ok) {
-    throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+    console.error(`GitHub API error: ${res.status} ${res.statusText}`);
+    throw new Error("Failed to fetch data from GitHub. Please try again.");
   }
 
   return res.json();

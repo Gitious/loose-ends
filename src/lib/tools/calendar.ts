@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
-import { withGmailAccess } from "@/lib/auth0-ai";
+import { withCalendarAccess } from "@/lib/auth0-ai";
 import type { LooseEnd, UrgencyLevel } from "@/lib/types";
 
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
@@ -34,7 +34,7 @@ interface CalendarEvent {
   htmlLink?: string;
 }
 
-export const scanCalendar = withGmailAccess(
+export const scanCalendar = withCalendarAccess(
   tool({
     description:
       "Scan Google Calendar for upcoming events that need attention: conflicts (overlapping events) and meetings with no agenda/description that have multiple attendees.",
@@ -65,9 +65,8 @@ export const scanCalendar = withGmailAccess(
       );
 
       if (!res.ok) {
-        throw new Error(
-          `Calendar API error: ${res.status} ${res.statusText}`
-        );
+        console.error(`Calendar API error: ${res.status} ${res.statusText}`);
+        throw new Error("Failed to fetch calendar events. Please try again.");
       }
 
       const data = await res.json();

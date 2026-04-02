@@ -70,16 +70,18 @@ Existing solutions attack this problem one silo at a time. Email clients surface
 - The email is sent only after phone approval; rejection cancels the action.
 - The UI shows real-time status of the approval request (pending, approved, rejected, expired).
 
-### US-6: Unified urgency-ranked dashboard
+### US-6: Chat-first agent interface with urgency-ranked results
 **As a** user overwhelmed by notifications,
-**I want** a single dashboard that ranks all my loose ends by urgency,
-**so that** I can focus on what matters most right now.
+**I want** a single chat interface where the AI agent scans all my services and presents urgency-ranked findings inline,
+**so that** I can focus on what matters most right now and immediately act on each item.
 
 **Acceptance Criteria:**
-- Dashboard displays loose ends from all connected sources in a single feed.
-- Items are sorted by a composite urgency score (age, source priority, contextual signals).
-- Each item shows its source icon (Gmail, Calendar, GitHub), a one-line summary, and the urgency indicator.
-- Clicking an item opens the chat agent pre-loaded with context about that item.
+- Chat interface serves as the primary interaction surface (no separate dashboard feed).
+- When the user asks the agent to scan, it invokes tool calls for all connected services in parallel.
+- Results are displayed inline in the chat with color-coded urgency dots (red/yellow/green).
+- Each tool call shows a live status indicator (pulsing dot while scanning, checkmark when done).
+- Each loose end card within chat results shows title, description, age, and urgency level.
+- User can continue the conversation to ask the agent for help resolving specific items.
 
 ### US-7: Connect and manage accounts via settings
 **As a** user,
@@ -123,3 +125,7 @@ Existing solutions attack this problem one silo at a time. Email clients surface
 - **Dark-first design:** The UI defaults to a dark theme consistent with the custom color palette (`le-void`, `le-surface`, `le-accent`, etc.).
 - **Responsive layout:** All pages function on viewports from 375px (mobile) to 1440px (desktop).
 - **Keyboard accessible:** All interactive elements are reachable and operable via keyboard.
+
+## Core Insight
+
+Token Vault is typically presented as a way to *connect* to third-party APIs. Loose Ends flips this: it uses Token Vault to discover what users **failed** to do across those APIs. The tokens are not just plumbing -- they are the lens through which the AI agent detects neglected responsibilities. This reframing -- from "access enabler" to "accountability mirror" -- is what makes the product compelling.

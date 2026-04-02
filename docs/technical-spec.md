@@ -2,18 +2,62 @@
 
 ## Architecture Overview
 
-Loose Ends is a Next.js 16 application deployed on Vercel. It combines server-side API routes for secure token handling with a React client that streams AI responses in real time. The key architectural principle is that **OAuth tokens never touch the browser** — Auth0 Token Vault manages them server-side, and the Next.js backend calls third-party APIs on behalf of the user.
+Loose Ends is a Next.js 16 application deployed on Vercel. It combines server-side API routes for secure token handling with a React client that streams AI responses in real time. The key architectural principle is that **OAuth tokens never touch the browser** -- Auth0 Token Vault manages them server-side, and the Next.js backend calls third-party APIs on behalf of the user.
+
+### High-Level Architecture
+
+```
++--------------------------------------------------+
+|                   Browser (Client)                |
+|                                                   |
+|   Landing Page    Chat Interface    Settings      |
+|   (page.tsx)      (ChatPanel)       (page.tsx)    |
+|        |               |                |         |
+|        |          useChat() hook         |         |
+|        |          (AI SDK React)         |         |
++--------|---------------|----------------|--------+
+         |               |                |
+    Auth0 Login    POST /api/chat    Connect Flow
+         |               |                |
++--------|---------------|----------------|--------+
+|                  Next.js Server                   |
+|                                                   |
+|   middleware.ts         /api/chat/route.ts         |
+|   (auth guard)          (streamText + tools)      |
+|                              |                    |
+|        +---------------------+---+                |
+|        |                     |   |                |
+|   scanGmail            scanCalendar  scanGitHub   |
+|   (gmail.ts)           (calendar.ts) (github.ts)  |
+|        |                     |        |           |
+|   withGmailAccess      withGmailAccess  withGitHubAccess
+|   (auth0-ai.ts)        (auth0-ai.ts)   (auth0-ai.ts)
+|        |                     |        |           |
++--------|---------------------|--------|----------+
+         |                     |        |
++--------|---------------------|--------|----------+
+|            Auth0 Token Vault                      |
+|                                                   |
+|   google-oauth2 connection    github connection   |
+|   (Gmail + Calendar scopes)   (repo, read:user)   |
+|                                                   |
+|   Stores & refreshes OAuth tokens server-side     |
+|   CIBA: withAsyncAuthorization for write actions  |
++--------------------------------------------------+
+         |                     |        |
+    Gmail API          Calendar API   GitHub API
+```
 
 ### Technology Stack
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Framework | Next.js 16 (App Router) | Full-stack React framework |
-| AI | Vercel AI SDK + `@ai-sdk/anthropic` | Streaming chat with tool calling |
-| Auth | `@auth0/nextjs-auth0` | Session management, Universal Login |
+| AI | Vercel AI SDK v6 + `@ai-sdk/anthropic` | Streaming chat with tool calling |
+| Auth | `@auth0/nextjs-auth0` v4 | Session management, Universal Login |
 | Token Management | `@auth0/ai` + `@auth0/ai-vercel` | Token Vault access, CIBA flows |
 | Styling | Tailwind CSS 4 | Utility-first CSS |
 | Animation | Framer Motion | Page transitions, micro-interactions |
-| Validation | Zod 4 | Runtime schema validation |
+| Validation | Zod 4 | Runtime schema validation for tool inputs |
 | Language | TypeScript 5 | Type safety throughout |
 
 ## Data Flow
@@ -61,21 +105,36 @@ Client                    Next.js API Route         Auth0 CIBA            User's
 
 ### AI Chat Flow
 ```
-Client                    POST /api/chat              Claude (Anthropic)
+Client (useChat hook)     POST /api/chat              Claude (claude-sonnet-4)
   |                             |                          |
-  |-- user message + context -->|                          |
+  |-- messages[] + id --------->|                          |
+  |                             |-- setAIContext(threadID) |
   |                             |-- streamText() --------->|
-  |                             |   (with tool definitions)|
+  |                             |   (system prompt +       |
+  |                             |    tools: scanGmail,     |
+  |                             |    scanCalendar,         |
+  |                             |    scanGitHub)           |
   |                             |                          |
   |                             |<-- stream tokens --------|
-  |<-- SSE stream --------------|                          |
+  |<-- UI message stream -------|                          |
   |                             |                          |
   |                             |<-- tool_call: scanGmail -|
-  |                             |-- execute tool --------->|  (server-side)
-  |                             |-- tool_result ---------->|
+  |                             |-- Token Vault: get token |
+  |                             |-- Gmail API: fetch msgs  |
+  |                             |-- tool_result: LooseEnd[]|
+  |                             |                          |
+  |                             |<-- tool_call: scanGitHub |
+  |                             |-- Token Vault: get token |
+  |                             |-- GitHub API: search PRs |
+  |                             |-- tool_result: LooseEnd[]|
+  |                             |                          |
   |                             |<-- continue stream ------|
-  |<-- SSE stream --------------|                          |
+  |<-- UI message stream -------|                          |
+  |                             |                          |
+  |   (stopWhen: stepCountIs(5) limits tool call depth)    |
 ```
+
+Note: The client uses `useChat()` from `@ai-sdk/react` which renders tool invocations as `dynamic-tool` message parts. The `ChatPanel` component detects these parts and renders `ToolResultCard` components inline, showing a pulsing indicator while tools execute and a checkmark with item count when complete.
 
 ## Key Technical Decisions
 
@@ -108,66 +167,71 @@ Client                    POST /api/chat              Claude (Anthropic)
 - Auth0 tenant configured with a Regular Web Application.
 
 ### Token Vault
-- Each third-party provider (Google for Gmail/Calendar, GitHub) is registered as a Token Vault connection in the Auth0 dashboard.
-- Server-side code uses `@auth0/ai` to request tokens by connection ID.
-- Tokens are requested on-demand for each API call and not cached by the application.
-- If a token is expired, Token Vault refreshes it transparently before returning.
+- Two Token Vault connections are configured: `google-oauth2` (Gmail + Calendar scopes) and `github` (repo + read:user scopes).
+- Server-side code uses `@auth0/ai-vercel`'s `Auth0AI.withTokenVault()` to wrap AI SDK tool definitions. Each wrapper specifies the connection ID, required scopes, and a `refreshToken` callback that reads the session's refresh token.
+- Inside wrapped tools, `getAccessTokenFromTokenVault()` retrieves the current access token -- Token Vault handles refresh transparently.
+- Google scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`.
+- GitHub scopes: `repo`, `read:user`.
+- The calendar scanner reuses the `withGmailAccess` wrapper because both Gmail and Calendar tokens come from the same `google-oauth2` connection.
 
 ### CIBA (Client-Initiated Backchannel Authentication)
 - Requires Auth0 Guardian configured on the user's phone.
-- Flow: API route calls `@auth0/ai` CIBA endpoint with a binding message describing the action (e.g., "Send email to john@example.com: Re: Q3 Budget").
-- Returns an `auth_req_id` that the server polls until the user approves or rejects.
-- Poll interval: 5 seconds. Timeout: 5 minutes.
-- On approval, the server proceeds with the write action. On rejection or timeout, the action is cancelled and the user is notified.
+- Configured via `Auth0AI.withAsyncAuthorization()` in `src/lib/auth0-ai.ts` (exported as `withSendApproval`).
+- The wrapper takes a `userID` callback (reads `user.sub` from session), a `bindingMessage` callback that formats the action description (e.g., "Approve: Send email to john@example.com"), and scopes/audience.
+- When a write-action tool wrapped with `withSendApproval` is invoked, Auth0 sends a push notification to the user's phone. The tool execution blocks until the user approves or rejects.
+- On approval, the server proceeds with the write action. On rejection or timeout, the action is cancelled and the user is notified in the chat stream.
 
 ## API Routes
 
 | Route | Method | Purpose |
 |-------|--------|---------|
-| `/api/auth/[auth0]` | * | Auth0 authentication handlers (login, callback, logout) |
-| `/api/oracle/generate` | POST | AI chat endpoint — accepts messages, streams Claude responses with tool calls |
-| `/api/scan/gmail` | POST | Scan Gmail for unreplied emails, return urgency-ranked results |
-| `/api/scan/calendar` | POST | Scan Google Calendar for conflicts and unprepared meetings |
-| `/api/scan/github` | POST | Scan GitHub for pending PR reviews and stale issues |
-| `/api/scan/all` | POST | Parallel scan of all connected services |
-| `/api/ciba/initiate` | POST | Start a CIBA approval flow for a write action |
-| `/api/ciba/status` | GET | Poll CIBA approval status by `auth_req_id` |
-| `/api/connections/status` | GET | Check which Token Vault connections are active for the user |
-| `/api/connections/[provider]` | DELETE | Disconnect a provider (revoke Token Vault token) |
+| `/api/auth/[...auth0]` | GET, POST | Auth0 authentication handlers (login, callback, logout) via `auth0.middleware()` |
+| `/api/chat` | POST | AI chat endpoint -- accepts messages, streams Claude responses with tool calls via `streamText()` |
+
+Scanning is not exposed as separate REST endpoints. Instead, the three scanner tools (`scanGmail`, `scanCalendar`, `scanGitHub`) are registered as AI SDK tools on the `/api/chat` route and invoked by the Claude model during conversation. This design means scanning is always mediated by the AI agent, which can contextualize results and suggest follow-up actions.
+
+CIBA approval flows are initiated via `withAsyncAuthorization` from `@auth0/ai-vercel`, configured in `src/lib/auth0-ai.ts`. The `withSendApproval` wrapper handles binding messages and polling automatically when wrapped around write-action tools.
 
 ## Component Hierarchy
 
 ```
-app/
-├── layout.tsx                    # Root layout: dark theme, fonts, Auth0 provider
-├── page.tsx                      # Landing page (unauthenticated)
+src/
+├── middleware.ts                      # Auth guard: redirects unauthenticated users to login
 │
-├── dashboard/
-│   ├── layout.tsx                # Authenticated layout: sidebar, nav
-│   └── page.tsx                  # Dashboard: urgency-ranked loose ends feed
+├── lib/
+│   ├── auth0.ts                      # Auth0Client setup, getSession(), getAccessToken(), getUser()
+│   ├── auth0-ai.ts                   # Token Vault wrappers (withGmailAccess, withGitHubAccess, withSendApproval)
+│   ├── types.ts                      # LooseEnd, UrgencyLevel, AuditEntry type definitions
+│   └── tools/
+│       ├── gmail.ts                  # scanGmail tool — unreplied emails via Gmail API
+│       ├── calendar.ts               # scanCalendar tool — conflicts & no-agenda meetings via Calendar API
+│       └── github.ts                 # scanGitHub tool — pending PR reviews & stale issues via GitHub API
 │
-├── chat/
-│   └── page.tsx                  # AI chat interface
-│       ├── ChatMessages          # Scrollable message list
-│       │   ├── UserMessage       # User's message bubble
-│       │   ├── AgentMessage      # Agent's streamed response
-│       │   └── ToolCallCard      # Inline display of tool execution (scan results, CIBA status)
-│       ├── ChatInput             # Message input with send button
-│       └── ContextSidebar        # Shows active loose end context
-│
-├── settings/
-│   └── page.tsx                  # Account connections management
-│       ├── ConnectionCard        # Per-provider connect/disconnect card
-│       └── ProfileSection        # User profile info from Auth0
-│
-├── api/                          # API routes (see table above)
+├── app/
+│   ├── layout.tsx                    # Root layout: dark theme, Auth0Provider wrapper
+│   ├── page.tsx                      # Landing page (unauthenticated): hero, features, CTA
+│   │
+│   ├── dashboard/
+│   │   ├── layout.tsx                # Authenticated layout: Nav bar
+│   │   └── page.tsx                  # Chat-first dashboard with ChatPanel
+│   │
+│   ├── settings/
+│   │   └── page.tsx                  # Account connections + Token Vault info
+│   │
+│   └── api/
+│       ├── auth/[...auth0]/route.ts  # Auth0 auth handlers (login, callback, logout)
+│       └── chat/route.ts             # AI chat: streamText() with scanner tools
 │
 └── components/
-    ├── ui/                       # Shared primitives (Button, Card, Badge, etc.)
-    ├── LooseEndCard.tsx          # Single loose end item (used in dashboard + chat)
-    ├── UrgencyBadge.tsx          # Color-coded urgency indicator
-    ├── SourceIcon.tsx            # Gmail / Calendar / GitHub icon
-    ├── CibaApprovalStatus.tsx    # Real-time CIBA approval state display
-    ├── ScanButton.tsx            # Trigger a scan with loading state
-    └── AnimatedLayout.tsx        # Framer Motion page transition wrapper
+    ├── ui/
+    │   ├── Nav.tsx                    # Top navigation bar (Loose Ends logo, Settings, Logout)
+    │   └── Badge.tsx                 # Color-coded urgency badge (red/yellow/green)
+    ├── chat/
+    │   └── ChatPanel.tsx             # Full chat UI: messages, tool results, input
+    │       ├── ToolResultCard        # Inline display of LooseEnd[] from tool calls
+    │       └── (loading indicator)   # Pulsing dots while agent is thinking
+    ├── dashboard/
+    │   └── LooseEndCard.tsx          # Single loose end card with urgency badge and action button
+    └── settings/
+        └── ConnectedAccounts.tsx     # Google and GitHub connection cards
 ```
