@@ -1,13 +1,39 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Auth0Provider } from "@auth0/nextjs-auth0";
 import "./globals.css";
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#08080c",
+};
+
 export const metadata: Metadata = {
-  title: "Loose Ends — Find Everything You've Dropped",
+  title: {
+    default: "Loose Ends — Find Everything You've Dropped",
+    template: "%s | Loose Ends",
+  },
   description:
     "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
   icons: {
     icon: "/favicon.svg",
+  },
+  openGraph: {
+    title: "Loose Ends — Find Everything You've Dropped",
+    description:
+      "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
+    type: "website",
+    siteName: "Loose Ends",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Loose Ends — Find Everything You've Dropped",
+    description:
+      "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 };
 

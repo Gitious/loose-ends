@@ -266,15 +266,28 @@ export default function ChatPanel() {
           className="flex-1 rounded-xl bg-le-void/50 border border-le-border/30 px-4 py-2.5 text-sm text-le-text placeholder:text-le-muted/50 outline-none transition-all duration-150 focus:border-le-accent/40 focus:ring-2 focus:ring-le-accent/10 focus:bg-le-void/70"
           disabled={isLoading}
         />
-        <button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          className="flex items-center justify-center h-10 w-10 rounded-xl bg-le-accent text-white transition-all duration-150 hover:bg-le-accent/90 hover:shadow-[0_0_20px_rgba(108,140,255,0.25)] active:scale-95 disabled:opacity-30 disabled:hover:shadow-none disabled:hover:bg-le-accent"
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-            <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
-          </svg>
-        </button>
+        {isLoading ? (
+          <button
+            type="button"
+            onClick={() => stop()}
+            className="flex items-center justify-center h-10 w-10 rounded-xl bg-le-red/15 border border-le-red/30 text-le-red transition-all duration-150 hover:bg-le-red/25 active:scale-95"
+            aria-label="Stop generating"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+              <rect x="3" y="3" width="10" height="10" rx="1.5" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            className="flex items-center justify-center h-10 w-10 rounded-xl bg-le-accent text-white transition-all duration-150 hover:bg-le-accent/90 hover:shadow-[0_0_20px_rgba(108,140,255,0.25)] active:scale-95 disabled:opacity-30 disabled:hover:shadow-none disabled:hover:bg-le-accent"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+            </svg>
+          </button>
+        )}
       </form>
     </div>
   );
