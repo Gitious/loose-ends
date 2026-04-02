@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
-import { withCalendarAccess } from "@/lib/auth0-ai";
+import { withGoogleConnection } from "@/lib/auth0-ai";
 import type { LooseEnd, UrgencyLevel } from "@/lib/types";
 
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
@@ -34,7 +34,7 @@ interface CalendarEvent {
   htmlLink?: string;
 }
 
-export const scanCalendar = withCalendarAccess(
+export const scanCalendar = withGoogleConnection(
   tool({
     description:
       "Scan Google Calendar for upcoming events that need attention: conflicts (overlapping events) and meetings with no agenda/description that have multiple attendees.",

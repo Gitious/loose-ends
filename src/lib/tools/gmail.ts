@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
-import { withGmailAccess } from "@/lib/auth0-ai";
+import { withGoogleConnection } from "@/lib/auth0-ai";
 import { getUrgencyByAge, formatAge } from "@/lib/types";
 import type { LooseEnd } from "@/lib/types";
 
@@ -18,7 +18,7 @@ async function gmailFetch(path: string, token: string) {
   return res.json();
 }
 
-export const scanGmail = withGmailAccess(
+export const scanGmail = withGoogleConnection(
   tool({
     description:
       "Scan Gmail inbox for unreplied emails from the last N days. Returns loose ends that need attention.",

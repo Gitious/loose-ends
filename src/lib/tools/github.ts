@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
-import { withGitHubAccess } from "@/lib/auth0-ai";
+import { withGitHubConnection } from "@/lib/auth0-ai";
 import { getUrgencyByAge, formatAge } from "@/lib/types";
 import type { LooseEnd } from "@/lib/types";
 
@@ -24,7 +24,7 @@ async function githubFetch(path: string, token: string) {
   return res.json();
 }
 
-export const scanGitHub = withGitHubAccess(
+export const scanGitHub = withGitHubConnection(
   tool({
     description:
       "Scan GitHub for pending review requests on pull requests and stale issues assigned to the user.",

@@ -14,10 +14,13 @@
     "@auth0/ai-vercel": "^5.1.0",
     "@auth0/nextjs-auth0": "^4.16.1",
     "ai": "^6.0.143",
+    "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
     "next": "16.2.2",
     "react": "19.2.4",
+    "react-device-detect": "^2.2.3",
     "react-dom": "19.2.4",
+    "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
