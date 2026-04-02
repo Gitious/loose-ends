@@ -67,7 +67,7 @@ export default function ConnectedAccounts() {
         {accounts.map((account, i) => (
           <motion.div
             key={account.id}
-            className="glass group rounded-2xl p-6 flex flex-col gap-4 transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(108,140,255,0.06)]"
+            className="glass group rounded-2xl p-6 flex flex-col gap-4 transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(232,168,73,0.06)]"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 + i * 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
@@ -86,7 +86,7 @@ export default function ConnectedAccounts() {
             </p>
             <a
               href={account.connectUrl}
-              className="mt-auto inline-flex items-center justify-center h-10 px-5 rounded-xl bg-le-accent text-le-void text-sm font-semibold transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_0_24px_rgba(108,140,255,0.3)] active:scale-[0.98]"
+              className="mt-auto inline-flex items-center justify-center h-10 px-5 rounded-xl bg-le-accent text-le-void text-sm font-semibold transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_0_24px_rgba(232,168,73,0.3)] active:scale-[0.98]"
             >
               Connect {account.name}
             </a>

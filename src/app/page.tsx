@@ -83,7 +83,7 @@ const features = [
 
 const integrations = [
   { name: "Gmail", color: "#EA4335" },
-  { name: "Calendar", color: "#4285F4" },
+  { name: "Calendar", color: "#e8a849" },
   { name: "GitHub", color: "#f0f0f0" },
 ];
 
@@ -119,7 +119,7 @@ export default function Home() {
           className="pointer-events-none absolute top-[40%] left-[35%] -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full opacity-10"
           style={{
             background:
-              "radial-gradient(circle, #ff4c4c 0%, transparent 65%)",
+              "radial-gradient(circle, #e85450 0%, transparent 65%)",
             filter: "blur(100px)",
           }}
         />
@@ -129,7 +129,7 @@ export default function Home() {
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.03]"
           style={{
-            backgroundImage: `linear-gradient(rgba(108,140,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(108,140,255,0.3) 1px, transparent 1px)`,
+            backgroundImage: `linear-gradient(rgba(232,168,73,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(232,168,73,0.3) 1px, transparent 1px)`,
             backgroundSize: "64px 64px",
           }}
         />
@@ -212,7 +212,7 @@ export default function Home() {
         >
           <a
             href="/auth/login"
-            className="group inline-flex items-center justify-center h-12 px-8 rounded-xl bg-le-accent text-le-void font-semibold text-sm tracking-wide transition-all duration-200 hover:scale-[1.03] hover:shadow-[0_0_32px_rgba(108,140,255,0.4)] active:scale-[0.98]"
+            className="group inline-flex items-center justify-center h-12 px-8 rounded-xl bg-le-accent text-le-void font-semibold text-sm tracking-wide transition-all duration-200 hover:scale-[1.03] hover:shadow-[0_0_32px_rgba(232,168,73,0.4)] active:scale-[0.98]"
           >
             Get Started
             <svg
@@ -277,7 +277,7 @@ export default function Home() {
           {features.map((f, i) => (
             <motion.div
               key={f.title}
-              className="glass group rounded-2xl p-8 flex flex-col items-start gap-4 transition-all duration-300 hover:border-le-accent/30 hover:shadow-[0_0_40px_rgba(108,140,255,0.08)]"
+              className="glass group rounded-2xl p-8 flex flex-col items-start gap-4 transition-all duration-300 hover:border-le-accent/30 hover:shadow-[0_0_40px_rgba(232,168,73,0.08)]"
               initial={{ opacity: 0, y: 28 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.3 }}

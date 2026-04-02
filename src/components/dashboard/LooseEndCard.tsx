@@ -63,7 +63,7 @@ export default function LooseEndCard({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: index * 0.06, ease: "easeOut" }}
-      className="glass group relative overflow-hidden rounded-xl transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(108,140,255,0.06)]"
+      className="glass group relative overflow-hidden rounded-xl transition-all duration-200 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(232,168,73,0.06)]"
     >
       {/* Urgency color bar on left edge */}
       <div

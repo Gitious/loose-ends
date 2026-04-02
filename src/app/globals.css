@@ -1,31 +1,31 @@
 @import "tailwindcss";
 
 @theme {
-  --color-le-void: #08080c;
-  --color-le-surface: #111118;
-  --color-le-elevated: #1a1a24;
-  --color-le-border: #2a2a3a;
-  --color-le-text: #e4e0d8;
-  --color-le-muted: #7a7680;
-  --color-le-accent: #6c8cff;
-  --color-le-accent-glow: #4a6cff;
-  --color-le-red: #ff4c4c;
-  --color-le-yellow: #f0b429;
-  --color-le-green: #34d399;
+  --color-le-void: #0a0908;
+  --color-le-surface: #141210;
+  --color-le-elevated: #1e1a16;
+  --color-le-border: #2e2820;
+  --color-le-text: #ede6db;
+  --color-le-muted: #8a7e70;
+  --color-le-accent: #e8a849;
+  --color-le-accent-glow: #d4922e;
+  --color-le-red: #e85450;
+  --color-le-yellow: #e8a849;
+  --color-le-green: #5cb870;
 }
 
 :root {
-  --le-void: #08080c;
-  --le-surface: #111118;
-  --le-elevated: #1a1a24;
-  --le-border: #2a2a3a;
-  --le-text: #e4e0d8;
-  --le-muted: #7a7680;
-  --le-accent: #6c8cff;
-  --le-accent-glow: #4a6cff;
-  --le-red: #ff4c4c;
-  --le-yellow: #f0b429;
-  --le-green: #34d399;
+  --le-void: #0a0908;
+  --le-surface: #141210;
+  --le-elevated: #1e1a16;
+  --le-border: #2e2820;
+  --le-text: #ede6db;
+  --le-muted: #8a7e70;
+  --le-accent: #e8a849;
+  --le-accent-glow: #d4922e;
+  --le-red: #e85450;
+  --le-yellow: #e8a849;
+  --le-green: #5cb870;
 }
 
 /* ── Base ── */
@@ -50,12 +50,12 @@ body::before {
 
 /* ── Glass panels ── */
 .glass {
-  background: rgba(17, 17, 24, 0.55);
+  background: rgba(20, 18, 16, 0.55);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(42, 42, 58, 0.45);
+  border: 1px solid rgba(46, 40, 32, 0.45);
   box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.03) inset,
+    0 0 0 0.5px rgba(237, 230, 219, 0.03) inset,
     0 2px 16px rgba(0, 0, 0, 0.3);
 }
 
@@ -67,23 +67,23 @@ body::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(122, 118, 128, 0.3);
+  background: rgba(138, 126, 112, 0.3);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(122, 118, 128, 0.5);
+  background: rgba(138, 126, 112, 0.5);
 }
 
 /* ── Focus ring default ── */
 *:focus-visible {
-  outline: 2px solid rgba(108, 140, 255, 0.5);
+  outline: 2px solid rgba(232, 168, 73, 0.5);
   outline-offset: 2px;
 }
 
 /* ── Selection color ── */
 ::selection {
-  background: rgba(108, 140, 255, 0.3);
-  color: #e4e0d8;
+  background: rgba(232, 168, 73, 0.3);
+  color: #ede6db;
 }
 
 /* ── Smooth scrolling ── */
