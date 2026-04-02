@@ -92,7 +92,7 @@ function AgentAvatar() {
 }
 
 export default function ChatPanel() {
-  const { messages, sendMessage, status } = useChat();
+  const { messages, sendMessage, status, error, stop } = useChat();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -237,6 +237,20 @@ export default function ChatPanel() {
             </motion.div>
           )}
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mx-3 mt-2 flex items-center gap-2 rounded-lg border border-le-red/30 bg-le-red/10 px-4 py-2 text-xs text-le-red">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 shrink-0">
+            <path
+              fillRule="evenodd"
+              d="M8 15A7 7 0 108 1a7 7 0 000 14zM7.25 5a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.75a.75.75 0 100-1.5.75.75 0 000 1.5z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>Something went wrong. Please try again.</span>
+        </div>
+      )}
 
       {/* Input */}
       <form
