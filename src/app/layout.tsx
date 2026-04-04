@@ -10,26 +10,26 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Loose Ends — Find Everything You've Dropped",
+    default: "Loose Ends | Find Everything You've Dropped",
     template: "%s | Loose Ends",
   },
   description:
-    "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
+    "AI agent that scans your Gmail, Calendar, GitHub, and Slack to find everything you've dropped.",
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: "Loose Ends — Find Everything You've Dropped",
+    title: "Loose Ends | Find Everything You've Dropped",
     description:
-      "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
+      "AI agent that scans your Gmail, Calendar, GitHub, and Slack to find everything you've dropped.",
     type: "website",
     siteName: "Loose Ends",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Loose Ends — Find Everything You've Dropped",
+    title: "Loose Ends | Find Everything You've Dropped",
     description:
-      "AI agent that scans your Gmail, Calendar, and GitHub to find everything you've failed to follow through on.",
+      "AI agent that scans your Gmail, Calendar, GitHub, and Slack to find everything you've dropped.",
   },
   robots: {
     index: true,
@@ -52,7 +52,7 @@ export default function RootLayout({
           crossOrigin=""
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
       </head>

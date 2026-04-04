@@ -37,7 +37,7 @@ const features = [
     ),
     title: "Scan",
     description:
-      "Connect your services and let the agent scan for dropped items across Gmail, Calendar, and GitHub.",
+      "Connect your services and let the agent scan for dropped items across Gmail, Calendar, GitHub, and Slack.",
   },
   {
     icon: (
@@ -77,7 +77,7 @@ const features = [
     ),
     title: "Resolve",
     description:
-      "Draft replies, create meeting agendas, and approve PRs — all from one place.",
+      "Draft replies, create meeting agendas, and approve PRs. All from one place.",
   },
 ];
 
@@ -85,6 +85,7 @@ const integrations = [
   { name: "Gmail", color: "#EA4335" },
   { name: "Calendar", color: "#e8a849" },
   { name: "GitHub", color: "#f0f0f0" },
+  { name: "Slack", color: "#4A154B" },
 ];
 
 export default function Home() {
@@ -151,7 +152,7 @@ export default function Home() {
         </motion.div>
 
         <motion.h1
-          className="relative text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold leading-[1.05] max-w-4xl tracking-tight"
+          className="relative font-display text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-normal leading-[1.05] max-w-4xl tracking-tight"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -177,8 +178,8 @@ export default function Home() {
           custom={2}
         >
           Unreplied emails. Forgotten PR reviews. Meetings you&apos;re walking
-          into blind. One scan across Gmail, Calendar, and GitHub — and nothing
-          slips through again.
+          into blind. Unanswered Slack DMs. One scan across Gmail, Calendar,
+          GitHub, and Slack. Nothing slips through again.
         </motion.p>
 
         {/* Integration badges */}
@@ -265,7 +266,7 @@ export default function Home() {
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.6 }}
         >
-          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+          <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
             How It Works
           </h2>
           <p className="mt-3 text-le-muted text-sm max-w-md mx-auto">
@@ -300,7 +301,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Social proof / trust ── */}
+      {/* ── What's under the hood ── */}
       <section className="relative max-w-3xl mx-auto px-6 pb-32">
         <motion.div
           className="glass rounded-2xl p-8 sm:p-12 text-center"
@@ -310,14 +311,45 @@ export default function Home() {
           transition={{ duration: 0.6, ease: easeOutExpo }}
         >
           <p className="text-lg sm:text-xl font-medium leading-relaxed text-le-text/90">
-            &ldquo;I had 14 unresolved items across three services.
+            Real API calls to Gmail, Calendar, GitHub, and Slack.
             <br className="hidden sm:block" />
-            Loose Ends found them all in{" "}
-            <span className="text-le-accent">under 30 seconds</span>.&rdquo;
+            Tokens managed by{" "}
+            <span className="text-le-accent">Auth0 Token Vault</span>.
+            <br className="hidden sm:block" />
+            Permissions enforced by{" "}
+            <span className="text-le-accent">Auth0 FGA</span>.
+            <br className="hidden sm:block" />
+            Sensitive actions approved via{" "}
+            <span className="text-le-accent">CIBA + Guardian</span>.
           </p>
-          <p className="mt-4 text-sm text-le-muted">
-            — Built for the Auth0 &ldquo;Authorized to Act&rdquo; Hackathon
-          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+            {[
+              "Next.js",
+              "Anthropic Claude",
+              "Auth0",
+              "Token Vault",
+              "FGA",
+              "CIBA",
+            ].map((t) => (
+              <span
+                key={t}
+                className="rounded-full border border-le-border/40 bg-le-surface/60 px-3 py-1 text-xs text-le-muted"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+          <div className="mt-6">
+            <a
+              href="/settings#insights"
+              className="inline-flex items-center gap-1.5 text-sm text-le-accent/80 transition-colors hover:text-le-accent"
+            >
+              Read our builder&apos;s notes
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+              </svg>
+            </a>
+          </div>
         </motion.div>
       </section>
 
@@ -328,7 +360,7 @@ export default function Home() {
             <rect width="32" height="32" rx="8" fill="currentColor" />
           </svg>
           <span>
-            Built with Auth0 Token Vault &bull; Authorized to Act Hackathon 2026
+            Built by Varun Menon. Secured by Auth0 Token Vault + FGA.
           </span>
         </div>
       </footer>

@@ -12,6 +12,7 @@ export const withGoogleConnection = auth0AI.withTokenVault({
     "openid",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/calendar.events",
   ],
@@ -21,6 +22,13 @@ export const withGoogleConnection = auth0AI.withTokenVault({
 // GitHub
 export const withGitHubConnection = auth0AI.withTokenVault({
   connection: "github",
-  scopes: ["repo", "read:user"],
+  scopes: ["read:user", "repo"],
+  refreshToken: getRefreshToken,
+});
+
+// Slack — custom OAuth2 connection using oauth.v2.user.access for top-level user tokens
+export const withSlackConnection = auth0AI.withTokenVault({
+  connection: "sign-in-with-slack",
+  scopes: [],
   refreshToken: getRefreshToken,
 });

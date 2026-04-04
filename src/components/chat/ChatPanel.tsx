@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+// CIBA interrupts are handled server-side in safeTool — no client interrupt hook needed
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -74,10 +75,27 @@ function isLooseEnd(value: unknown): value is LooseEnd {
   );
 }
 
-function parseToolOutput(output: unknown): LooseEnd[] | null {
-  if (!Array.isArray(output)) return null;
-  if (output.length === 0) return [];
-  if (output.every(isLooseEnd)) return output;
+interface ToolResult {
+  looseEnds: LooseEnd[];
+  error?: string;
+}
+
+function parseToolOutput(output: unknown): ToolResult | null {
+  // Handle { looseEnds: [...], error?: "..." } shape
+  if (
+    typeof output === "object" &&
+    output !== null &&
+    "looseEnds" in output
+  ) {
+    const obj = output as { looseEnds?: unknown; error?: string };
+    const items = Array.isArray(obj.looseEnds) ? obj.looseEnds.filter(isLooseEnd) : [];
+    return { looseEnds: items, error: obj.error };
+  }
+  // Handle direct array (legacy)
+  if (Array.isArray(output)) {
+    if (output.length === 0) return { looseEnds: [] };
+    return { looseEnds: output.filter(isLooseEnd) };
+  }
   return null;
 }
 
@@ -142,7 +160,7 @@ export default function ChatPanel() {
                 key={message.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
+                transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
                 className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}
               >
                 {!isUser && <AgentAvatar />}
@@ -175,42 +193,71 @@ export default function ChatPanel() {
                       const label =
                         TOOL_LABELS[part.toolName] ?? part.toolName;
                       const isDone = part.state === "output-available";
-                      const looseEnds = isDone
+                      const result = isDone
                         ? parseToolOutput(part.output)
                         : null;
+                      const hasError = result?.error;
+                      const itemCount = result?.looseEnds?.length ?? 0;
 
                       return (
                         <div key={i}>
                           <span
                             className={`my-1 flex items-center gap-2 text-xs font-medium ${
-                              isDone ? "text-le-green" : "text-le-yellow"
+                              hasError
+                                ? "text-le-red"
+                                : isDone
+                                  ? "text-le-green"
+                                  : "text-le-yellow"
                             }`}
                           >
                             {isDone ? (
-                              <svg
-                                className="h-3.5 w-3.5 shrink-0"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                              >
-                                <path
-                                  d="M3 8.5l3.5 3.5L13 4"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
+                              hasError ? (
+                                <svg
+                                  className="h-3.5 w-3.5 shrink-0"
+                                  viewBox="0 0 16 16"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M8 15A7 7 0 108 1a7 7 0 000 14zM7.25 5a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.75a.75.75 0 100-1.5.75.75 0 000 1.5z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              ) : (
+                                <svg
+                                  className="h-3.5 w-3.5 shrink-0"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                >
+                                  <path
+                                    d="M3 8.5l3.5 3.5L13 4"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              )
                             ) : (
                               <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-le-yellow opacity-40" />
                                 <span className="relative inline-flex h-2 w-2 rounded-full bg-le-yellow" />
                               </span>
                             )}
-                            {isDone
-                              ? `${label} — found ${looseEnds?.length ?? 0} item${(looseEnds?.length ?? 0) === 1 ? "" : "s"}`
-                              : `${label}...`}
+                            {!isDone
+                              ? `${label}...`
+                              : hasError
+                                ? `${label}: not connected`
+                                : `${label}: found ${itemCount} item${itemCount === 1 ? "" : "s"}`}
                           </span>
-                          {looseEnds && <ToolResultCard items={looseEnds} />}
+                          {result && !hasError && (
+                            <ToolResultCard items={result.looseEnds} />
+                          )}
+                          {hasError && (
+                            <p className="my-1 text-xs italic text-le-muted">
+                              {result.error}
+                            </p>
+                          )}
                         </div>
                       );
                     }
@@ -222,7 +269,7 @@ export default function ChatPanel() {
           })}
         </AnimatePresence>
 
-        {/* TokenVault interrupt handler - will be re-enabled when withInterruptions is added back */}
+        {/* CIBA approval status is shown via tool results in the message stream */}
 
         {/* Loading indicator */}
         {isLoading &&

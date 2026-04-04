@@ -6,9 +6,11 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
-      <Nav />
-      <main className="pt-14">{children}</main>
-    </>
+    <div className="h-dvh flex flex-col bg-le-void text-le-text">
+      <div className="shrink-0">
+        <Nav />
+      </div>
+      <div className="flex-1 min-h-0">{children}</div>
+    </div>
   );
 }

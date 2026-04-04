@@ -3,6 +3,10 @@
 import { Suspense } from "react";
 import Nav from "@/components/ui/Nav";
 import ConnectedAccounts from "@/components/settings/ConnectedAccounts";
+import MemoryPanel from "@/components/settings/MemoryPanel";
+import AgentPermissions from "@/components/settings/AgentPermissions";
+import AuditLog from "@/components/settings/AuditLog";
+// BuilderInsights removed — developer content belongs in submission writeup, not in-app
 import { motion } from "framer-motion";
 
 export default function SettingsPage() {
@@ -17,7 +21,7 @@ export default function SettingsPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         >
-          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+          <h1 className="font-display text-3xl tracking-tight">Settings</h1>
           <p className="mt-2 text-sm text-le-muted">
             Manage your connected services and account preferences.
           </p>
@@ -27,6 +31,15 @@ export default function SettingsPage() {
         <Suspense fallback={<div className="text-le-muted text-sm">Loading connected accounts...</div>}>
           <ConnectedAccounts />
         </Suspense>
+
+        {/* What I've Learned */}
+        <MemoryPanel />
+
+        {/* Agent Permissions (FGA) */}
+        <AgentPermissions />
+
+        {/* Activity Log (Audit Trail) */}
+        <AuditLog />
 
         {/* About / Token Vault */}
         <motion.section
@@ -54,9 +67,9 @@ export default function SettingsPage() {
             </span>{" "}
             to securely store and manage your third-party access tokens. Your
             credentials are encrypted at rest and never exposed to our
-            application code. When the agent needs to act on your behalf — such
-            as reading Gmail threads or approving a pull request — it requests
-            a scoped, short-lived token from the vault at runtime.
+            application code. When the agent needs to act on your behalf (reading
+            Gmail threads, approving a pull request), it requests a scoped,
+            short-lived token from the vault at runtime.
           </p>
           <p className="text-sm text-le-muted leading-relaxed">
             You can revoke access to any connected service at any time from this
