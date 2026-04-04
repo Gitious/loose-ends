@@ -4,12 +4,10 @@
  * Every action the agent takes (or is denied from taking) is logged
  * with full context: who, what, when, permitted, and success status.
  *
- * Stores JSON files under <project-root>/data/audit/{sanitizedUserId}.json.
+ * Stores rows in the Neon Postgres `audit_entries` table.
  */
 
-import fs from "fs/promises";
-import path from "path";
-import { getDataDir, sanitizeUserId } from "./storage";
+import sql, { ensureTables } from "./db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,27 +25,17 @@ export interface AuditEntry {
   success: boolean; // did the action succeed?
 }
 
-interface AuditLog {
-  userId: string;
-  entries: AuditEntry[];
-}
-
 // ---------------------------------------------------------------------------
-// File helpers
+// Initialization guard
 // ---------------------------------------------------------------------------
 
-const AUDIT_DIR = path.join(getDataDir(), "audit");
+let tablesReady: Promise<void> | null = null;
 
-function filePath(userId: string): string {
-  return path.join(AUDIT_DIR, `${sanitizeUserId(userId)}.json`);
-}
-
-async function ensureDir(): Promise<void> {
-  await fs.mkdir(AUDIT_DIR, { recursive: true });
-}
-
-function generateId(): string {
-  return `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+function ensureReady(): Promise<void> {
+  if (!tablesReady) {
+    tablesReady = ensureTables();
+  }
+  return tablesReady;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,52 +43,69 @@ function generateId(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Append an action entry to the user's audit log.
+ * Append an action entry to the audit log.
  */
 export async function logAction(
   entry: Omit<AuditEntry, "id" | "timestamp">
 ): Promise<void> {
-  await ensureDir();
-
-  const fullEntry: AuditEntry = {
-    id: generateId(),
-    timestamp: new Date().toISOString(),
-    ...entry,
-  };
-
-  let log: AuditLog;
   try {
-    const raw = await fs.readFile(filePath(entry.userId), "utf-8");
-    log = JSON.parse(raw) as AuditLog;
-  } catch {
-    log = { userId: entry.userId, entries: [] };
+    await ensureReady();
+
+    const id = crypto.randomUUID();
+
+    await sql`
+      INSERT INTO audit_entries (id, user_id, action, service, target, details, permitted, success)
+      VALUES (
+        ${id},
+        ${entry.userId},
+        ${entry.action},
+        ${entry.service},
+        ${entry.target ?? null},
+        ${entry.details ?? null},
+        ${entry.permitted},
+        ${entry.success}
+      )
+    `;
+  } catch (err) {
+    console.error("[audit] logAction failed:", err);
   }
-
-  log.entries.push(fullEntry);
-
-  // Cap at 500 entries to prevent unbounded growth
-  if (log.entries.length > 500) {
-    log.entries = log.entries.slice(-500);
-  }
-
-  await fs.writeFile(filePath(entry.userId), JSON.stringify(log, null, 2), "utf-8");
 }
 
 /**
  * Get the user's audit log entries, newest first.
  * @param userId - The user ID
- * @param limit - Maximum number of entries to return (default 50)
+ * @param limit - Maximum number of entries to return (default 50, max 500)
  */
 export async function getAuditLog(
   userId: string,
   limit: number = 50
 ): Promise<AuditEntry[]> {
   try {
-    const raw = await fs.readFile(filePath(userId), "utf-8");
-    const log = JSON.parse(raw) as AuditLog;
-    // Return newest first, limited
-    return log.entries.slice().reverse().slice(0, limit);
-  } catch {
+    await ensureReady();
+
+    const safeLimit = Math.min(Math.max(1, limit), 500);
+
+    const rows = await sql`
+      SELECT id, user_id, timestamp, action, service, target, details, permitted, success
+      FROM audit_entries
+      WHERE user_id = ${userId}
+      ORDER BY timestamp DESC
+      LIMIT ${safeLimit}
+    `;
+
+    return rows.map((r) => ({
+      id: r.id as string,
+      timestamp: (r.timestamp as Date).toISOString(),
+      userId: r.user_id as string,
+      action: r.action as string,
+      service: r.service as string,
+      target: (r.target as string) ?? undefined,
+      details: (r.details as string) ?? undefined,
+      permitted: r.permitted as boolean,
+      success: r.success as boolean,
+    }));
+  } catch (err) {
+    console.error("[audit] getAuditLog failed:", err);
     return [];
   }
 }

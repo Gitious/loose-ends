@@ -10,6 +10,7 @@
   --color-le-muted: #8a7e70;
   --color-le-accent: #e8a849;
   --color-le-accent-glow: #d4922e;
+  --color-le-accent-soft: #f5d99a;
   --color-le-red: #e85450;
   --color-le-yellow: #e8a849;
   --color-le-green: #5cb870;
@@ -24,6 +25,7 @@
   --le-muted: #8a7e70;
   --le-accent: #e8a849;
   --le-accent-glow: #d4922e;
+  --le-accent-soft: #f5d99a;
   --le-red: #e85450;
   --le-yellow: #e8a849;
   --le-green: #5cb870;
@@ -40,6 +42,8 @@ body {
   background: var(--le-void);
   color: var(--le-text);
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Noise texture overlay ── */
@@ -49,47 +53,76 @@ body::before {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  opacity: 0.035;
+  opacity: 0.03;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
 }
 
+/* ── Ambient glow — persistent warm atmosphere ── */
+body::after {
+  content: "";
+  position: fixed;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(232, 168, 73, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
 /* ── Glass panels ── */
 .glass {
-  background: rgba(20, 18, 16, 0.55);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(46, 40, 32, 0.45);
+  background: rgba(20, 18, 16, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(46, 40, 32, 0.5);
   box-shadow:
-    0 0 0 0.5px rgba(237, 230, 219, 0.03) inset,
-    0 2px 16px rgba(0, 0, 0, 0.3);
+    0 0 0 0.5px rgba(237, 230, 219, 0.04) inset,
+    0 1px 0 0 rgba(237, 230, 219, 0.02) inset,
+    0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Glass hover lift ── */
+.glass-hover {
+  transition: all 0.2s ease;
+}
+.glass-hover:hover {
+  border-color: rgba(232, 168, 73, 0.25);
+  box-shadow:
+    0 0 0 0.5px rgba(237, 230, 219, 0.04) inset,
+    0 1px 0 0 rgba(237, 230, 219, 0.03) inset,
+    0 8px 40px rgba(0, 0, 0, 0.5),
+    0 0 60px rgba(232, 168, 73, 0.04);
 }
 
 /* ── Custom scrollbar ── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(138, 126, 112, 0.3);
+  background: rgba(138, 126, 112, 0.2);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(138, 126, 112, 0.5);
+  background: rgba(138, 126, 112, 0.4);
 }
 
-/* ── Focus ring default ── */
+/* ── Focus ring ── */
 *:focus-visible {
-  outline: 2px solid rgba(232, 168, 73, 0.5);
+  outline: 2px solid rgba(232, 168, 73, 0.4);
   outline-offset: 2px;
 }
 
-/* ── Selection color ── */
+/* ── Selection ── */
 ::selection {
-  background: rgba(232, 168, 73, 0.3);
+  background: rgba(232, 168, 73, 0.25);
   color: #ede6db;
 }
 
@@ -98,13 +131,7 @@ html {
   scroll-behavior: smooth;
 }
 
-/* ── Subtle text rendering ── */
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* ── Prose (markdown) overrides for dark theme ── */
+/* ── Prose (markdown) overrides ── */
 .prose.prose-invert {
   --tw-prose-body: var(--le-text);
   --tw-prose-headings: var(--le-text);
@@ -161,4 +188,126 @@ body {
 .prose.prose-invert blockquote {
   border-left-color: var(--le-accent);
   color: var(--le-muted);
+}
+
+/* ── Animated accent line for service tiles ── */
+@keyframes tile-accent-pulse {
+  0%, 100% { opacity: 0.5; transform: scaleX(0.6); }
+  50% { opacity: 1; transform: scaleX(1); }
+}
+
+.tile-accent-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, transparent, var(--le-accent), transparent);
+  animation: tile-accent-pulse 3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* ── Breathing glow for Scan button ── */
+@keyframes scan-breathe {
+  0%, 100% { box-shadow: 0 0 12px rgba(232, 168, 73, 0.15), 0 0 4px rgba(232, 168, 73, 0.1); }
+  50% { box-shadow: 0 0 28px rgba(232, 168, 73, 0.35), 0 0 8px rgba(232, 168, 73, 0.2); }
+}
+
+.scan-btn-glow {
+  animation: scan-breathe 2.5s ease-in-out infinite;
+}
+
+/* ── Radial scan sweep ── */
+@keyframes scan-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.scan-sweep-overlay {
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(232, 168, 73, 0.08) 60deg, transparent 120deg);
+  animation: scan-sweep 2.5s linear infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* ── Orbital ring for hero ── */
+@keyframes orbit-spin {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.orbital-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  border: 1px solid rgba(232, 168, 73, 0.08);
+  pointer-events: none;
+  animation: orbit-spin 30s linear infinite;
+}
+
+.orbital-ring::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--le-accent);
+  box-shadow: 0 0 10px rgba(232, 168, 73, 0.6);
+}
+
+/* ── Connecting thread for "How It Works" ── */
+@keyframes thread-draw {
+  0% { stroke-dashoffset: 600; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* ── Nav watcher dot ── */
+@keyframes watcher-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+.nav-watcher-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--le-accent);
+  box-shadow: 0 0 6px rgba(232, 168, 73, 0.5);
+  animation: watcher-pulse 2.5s ease-in-out infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* ── Threat level bar animation ── */
+@keyframes threat-fill {
+  from { width: 0; }
+}
+.threat-bar {
+  animation: threat-fill 0.6s ease-out forwards;
+}
+
+/* ── Expand-in-place card transition ── */
+.card-expand-enter {
+  animation: card-expand 0.25s ease-out;
+}
+
+@keyframes card-expand {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 600px; }
+}
+
+/* ── Timeline node pulse for urgent items ── */
+@keyframes timeline-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(232, 84, 80, 0.2); }
+  50% { box-shadow: 0 0 12px rgba(232, 84, 80, 0.4); }
+}
+.timeline-node-urgent {
+  animation: timeline-pulse 2.5s ease-in-out infinite;
 }

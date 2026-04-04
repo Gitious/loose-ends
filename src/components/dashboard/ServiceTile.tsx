@@ -10,8 +10,8 @@ const SERVICE_META: Record<string, { label: string; color: string; gradient: str
     gradient: "from-red-500/20 to-red-500/5",
     icon: (
       <svg viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6">
-        <path d="M3 4a2 2 0 00-2 2v1.161l8.441 4.221a1.25 1.25 0 001.118 0L19 7.161V6a2 2 0 00-2-2H3z" />
-        <path d="M19 8.839l-7.556 3.778a2.75 2.75 0 01-2.466-.022L1 8.839V14a2 2 0 002 2h14a2 2 0 002-2V8.839z" />
+        <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
+        <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
       </svg>
     ),
   },
@@ -88,8 +88,14 @@ export default function ServiceTile({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay: index * 0.06, ease: [0.25, 1, 0.5, 1] }}
-      className="glass group relative flex flex-col overflow-hidden rounded-2xl p-6 text-left transition-all duration-150 hover:border-le-accent/30 hover:shadow-[0_0_40px_rgba(232,168,73,0.08)] hover:scale-[1.01] active:scale-[0.985]"
+      className="glass glass-hover group relative flex flex-col overflow-hidden rounded-2xl p-6 text-left hover:scale-[1.01] active:scale-[0.985]"
     >
+      {/* Animated accent line at top when connected */}
+      {connected && <div className="tile-accent-line" />}
+
+      {/* Radial scan sweep when scanning */}
+      {isScanning && <div className="scan-sweep-overlay" />}
+
       {/* Gradient background accent */}
       <div className={`absolute inset-0 bg-gradient-to-br ${meta.gradient} opacity-0 transition-opacity duration-300 group-hover:opacity-100`} />
 

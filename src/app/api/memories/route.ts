@@ -1,5 +1,5 @@
 import { auth0 } from "@/lib/auth0";
-import { loadMemories, deleteMemory } from "@/lib/memory";
+import { loadMemories, deleteMemory, appendMemory } from "@/lib/memory";
 
 export async function GET() {
   const session = await auth0.getSession();
@@ -11,6 +11,25 @@ export async function GET() {
   const memories = await loadMemories(userId);
 
   return Response.json(memories);
+}
+
+export async function POST(request: Request) {
+  const session = await auth0.getSession();
+  if (!session) return new Response("Unauthorized", { status: 401 });
+
+  const { content, source } = await request.json();
+  if (!content || typeof content !== "string") {
+    return Response.json({ error: "Missing content" }, { status: 400 });
+  }
+
+  const userId = session.user.sub;
+  const validSources = ["gmail", "calendar", "github", "slack", "chat", "agent"];
+  const memory = await appendMemory(userId, {
+    content: content.trim(),
+    source: validSources.includes(source) ? source : "chat",
+  });
+
+  return Response.json(memory);
 }
 
 export async function DELETE(request: Request) {

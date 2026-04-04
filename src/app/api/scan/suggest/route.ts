@@ -56,14 +56,20 @@ export async function POST(req: Request) {
 
   const schema = shouldAnalyzeMemories
     ? z.object({
-        suggestions: z.record(z.string(), z.string()),
+        suggestions: z.array(z.object({
+          itemNumber: z.string().describe("The item number as a string, e.g. '1', '2'"),
+          suggestion: z.string().describe("One-sentence suggestion, max 12 words"),
+        })),
         memories: z.array(z.object({
           content: z.string(),
           source: z.enum(["gmail", "calendar", "github", "slack"]),
         })).describe("Only genuinely useful new patterns. Max 2. Empty array if nothing notable."),
       })
     : z.object({
-        suggestions: z.record(z.string(), z.string()),
+        suggestions: z.array(z.object({
+          itemNumber: z.string().describe("The item number as a string, e.g. '1', '2'"),
+          suggestion: z.string().describe("One-sentence suggestion, max 12 words"),
+        })),
       });
 
   const memoryInstruction = shouldAnalyzeMemories
@@ -71,7 +77,7 @@ export async function POST(req: Request) {
     : "";
 
   const { object } = await generateObject({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-haiku-4-5-20251001"),
     schema,
     prompt: `Analyze these loose ends from a user's Gmail, Calendar, GitHub, and Slack.
 
@@ -83,10 +89,11 @@ ${items}`,
 
   // Map suggestions back to IDs
   const suggestions: Record<string, string> = {};
+  const suggestionArray = (object.suggestions ?? []) as Array<{ itemNumber: string; suggestion: string }>;
   looseEnds.slice(0, 20).forEach((le, i) => {
-    const key = String(i + 1);
-    if ((object as Record<string, unknown>).suggestions && (object.suggestions as Record<string, string>)[key]) {
-      suggestions[le.id] = (object.suggestions as Record<string, string>)[key];
+    const match = suggestionArray.find((s) => s.itemNumber === String(i + 1));
+    if (match) {
+      suggestions[le.id] = match.suggestion;
     }
   });
 

@@ -9,116 +9,56 @@ const cibaAI = new Auth0AI({
 });
 
 /**
+ * Sanitize a string for CIBA binding messages.
+ * Auth0 only allows: alphanumerics, whitespace, and +-_.,:#
+ * Everything else is stripped.
+ */
+function sanitize(s: string): string {
+  return s.replace(/[^a-zA-Z0-9\s+\-_.,:#@]/g, "").trim();
+}
+
+/**
  * Build a human-readable binding message for the Guardian push notification
  * based on the tool arguments. Keeps it short and descriptive.
+ * All output is sanitized to only CIBA-allowed characters.
  */
 function buildBindingMessage(args: Record<string, any>): string {
+  // bulkTrashJunk: { messageIds, reason }
+  if (Array.isArray(args.messageIds) && args.reason) {
+    return sanitize(`Trash ${args.messageIds.length} junk emails`);
+  }
+
   // trashEmail: { messageId, reason }
   if (args.messageId && args.reason) {
-    const reason = args.reason.length > 40 ? args.reason.slice(0, 40) + "…" : args.reason;
-    return `Trash email: ${reason}`;
+    const reason = String(args.reason).slice(0, 40);
+    return sanitize(`Trash email: ${reason}`);
   }
 
   // sendEmailReply: { threadId, to, subject, body }
   if (args.threadId && args.to && args.subject) {
-    const subject =
-      args.subject.length > 30 ? args.subject.slice(0, 30) + "…" : args.subject;
-    return `Send email to ${args.to}: ${subject}`;
+    const subject = String(args.subject).slice(0, 30);
+    return sanitize(`Send email to ${args.to}: ${subject}`);
   }
 
   // sendNewEmail: { to, subject, body } (no threadId)
   if (args.to && args.subject && args.body && !args.threadId) {
-    const subject =
-      args.subject.length > 30 ? args.subject.slice(0, 30) + "…" : args.subject;
-    return `Send email to ${args.to}: ${subject}`;
+    const subject = String(args.subject).slice(0, 30);
+    return sanitize(`Send email to ${args.to}: ${subject}`);
   }
 
   // reviewPullRequest: { owner, repo, prNumber, event, body }
   if (args.owner && args.repo && args.prNumber) {
     const action = (args.event || "review").toLowerCase().replace(/_/g, " ");
-    return `${action.charAt(0).toUpperCase() + action.slice(1)} PR ${args.owner}/${args.repo}#${args.prNumber}`;
+    return sanitize(`${action.charAt(0).toUpperCase() + action.slice(1)} PR ${args.owner}/${args.repo}#${args.prNumber}`);
   }
 
   // sendSlackMessage: { channel, text }
   if (args.channel && args.text) {
-    const preview = args.text.length > 30 ? args.text.slice(0, 30) + "…" : args.text;
-    return `Post to Slack ${args.channel}: ${preview}`;
+    const preview = String(args.text).slice(0, 30);
+    return sanitize(`Post to Slack ${args.channel}: ${preview}`);
   }
 
   return "Loose Ends: perform an action";
-}
-
-/**
- * Build RFC 9396 Rich Authorization Request details from tool arguments.
- * Each element has a `type` string and contextual fields so the Guardian
- * push notification can show exactly what the agent wants to do.
- */
-function buildAuthorizationDetails(
-  args: Record<string, any>
-): Array<{ type: string; [key: string]: unknown }> {
-  // trashEmail
-  if (args.messageId && args.reason) {
-    return [
-      {
-        type: "gmail_action",
-        actions: ["trash"],
-        messageId: args.messageId,
-        reason: args.reason,
-      },
-    ];
-  }
-
-  // sendEmailReply
-  if (args.threadId && args.to && args.subject) {
-    return [
-      {
-        type: "gmail_action",
-        actions: ["send_reply"],
-        threadId: args.threadId,
-        to: args.to,
-        subject: args.subject,
-      },
-    ];
-  }
-
-  // sendNewEmail (no threadId)
-  if (args.to && args.subject && args.body && !args.threadId) {
-    return [
-      {
-        type: "gmail_action",
-        actions: ["send"],
-        to: args.to,
-        subject: args.subject,
-      },
-    ];
-  }
-
-  // reviewPullRequest
-  if (args.owner && args.repo && args.prNumber) {
-    return [
-      {
-        type: "github_action",
-        actions: ["review_pull_request"],
-        owner: args.owner,
-        repo: args.repo,
-        prNumber: args.prNumber,
-        event: args.event,
-      },
-    ];
-  }
-
-  // sendSlackMessage
-  if (args.channel && args.text) {
-    return [
-      {
-        type: "slack_action",
-        actions: ["send_message"],
-        channel: args.channel,
-      },
-    ];
-  }
-
-  return [{ type: "loose_ends_action", actions: ["unknown"] }];
 }
 
 /**
@@ -126,8 +66,10 @@ function buildAuthorizationDetails(
  * Sends a push notification via Auth0 Guardian and waits for user approval.
  * Used for Tier 3 actions: sending emails, approving PRs, posting messages.
  *
- * Includes RFC 9396 Rich Authorization Requests so Guardian shows exactly
- * what the agent wants to do (e.g. "Send email to jane@example.com: Re: Q2 Budget").
+ * NOTE: authorizationDetails (RFC 9396 RAR) is intentionally omitted.
+ * The Auth0 resource server must be configured to accept custom RAR types
+ * before they can be used. The binding message alone is sufficient for the
+ * Guardian push notification to show what action the agent wants to take.
  */
 export const withCIBA = cibaAI.withAsyncAuthorization({
   scopes: ["openid"],
@@ -146,28 +88,32 @@ export const withCIBA = cibaAI.withAsyncAuthorization({
   },
 
   bindingMessage: async (toolArgs: any) => {
-    return buildBindingMessage(toolArgs ?? {});
+    const msg = buildBindingMessage(toolArgs ?? {});
+    console.log("[CIBA] Binding message:", msg);
+    console.log("[CIBA] Initiating backchannel authorization...");
+    return msg;
   },
 
-  authorizationDetails: async (toolArgs: any) => {
-    return buildAuthorizationDetails(toolArgs ?? {});
-  },
+  // RAR removed — Auth0 API rejects custom authorization_details types
+  // unless explicitly configured in the Dashboard. The binding message
+  // is sufficient for Guardian push notifications.
 
   requestedExpiry: 300, // 5 minutes to approve
 
   // Block mode: tool execution waits until user approves on their phone
-  // (no manual retry needed — the request hangs until Guardian approval comes through)
   onAuthorizationRequest: "block",
 
   // Credentials valid for a single tool call
   credentialsContext: "tool-call",
 
-  // When user denies or request expires, return a friendly message
+  // FAIL-CLOSED: when CIBA fails for ANY reason (user denies, config error,
+  // timeout), THROW so the tool does NOT execute and safeTool reports the error.
+  // Previously this RETURNED an error object, which the model misinterpreted as success.
   onUnauthorized: (err) => {
-    console.error("[CIBA] Unauthorized:", err?.message);
-    return {
-      error: `Action not approved: ${err?.message || "unknown error"}. Check Auth0 Guardian on your phone.`,
-      denied: true,
-    };
+    const msg = err?.message || "unknown error";
+    console.error("[CIBA] Unauthorized — THROWING to prevent tool execution:", msg);
+    throw new Error(
+      `Action blocked: Guardian approval required. ${msg}`
+    );
   },
 });

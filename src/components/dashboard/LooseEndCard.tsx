@@ -1,8 +1,10 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import type { LooseEnd } from "@/lib/types";
 import Badge from "@/components/ui/Badge";
+import ActionConfirmSheet from "./ActionConfirmSheet";
 
 const typeIcons: Record<
   LooseEnd["type"],
@@ -63,27 +65,100 @@ const ACTION_STYLES = {
   ghost: "text-le-muted hover:text-le-text hover:bg-le-elevated/50",
 };
 
+const BODY_TRUNCATE_LENGTH = 500;
+
 export default function LooseEndCard({
   item,
   index,
   suggestionsLoading,
   isPending,
   onAction,
+  onDismiss,
+  isExpanded,
+  onToggleExpand,
+  confirmAction,
+  onConfirm,
+  onCancelConfirm,
 }: {
   item: LooseEnd;
   index: number;
   suggestionsLoading?: boolean;
   isPending?: boolean;
   onAction?: (actionId: string) => void;
+  onDismiss?: () => void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  confirmAction?: { item: LooseEnd; actionId: string } | null;
+  onConfirm?: (payload: { body: string }) => void;
+  onCancelConfirm?: () => void;
 }) {
   const { icon, label } = typeIcons[item.type];
+  const [itemBody, setItemBody] = useState<string | null>(null);
+  const [isLoadingBody, setIsLoadingBody] = useState(false);
+  const [isBodyExpanded, setIsBodyExpanded] = useState(false);
+
+  const importanceScore = item.meta?.importanceScore;
+
+  const fetchBody = useCallback(async () => {
+    setItemBody(null);
+    setIsLoadingBody(true);
+    setIsBodyExpanded(false);
+    try {
+      const res = await fetch("/api/actions/get-body", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setItemBody(data.body || null);
+      } else {
+        setItemBody(null);
+      }
+    } catch {
+      setItemBody(null);
+    } finally {
+      setIsLoadingBody(false);
+    }
+  }, [item]);
+
+  useEffect(() => {
+    if (isExpanded) {
+      fetchBody();
+    } else {
+      setItemBody(null);
+      setIsLoadingBody(false);
+      setIsBodyExpanded(false);
+    }
+  }, [isExpanded, fetchBody]);
+
+  // Escape key collapses
+  useEffect(() => {
+    if (!isExpanded) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && onToggleExpand) {
+        onToggleExpand();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isExpanded, onToggleExpand]);
+
+  const bodyIsTruncated = itemBody != null && itemBody.length > BODY_TRUNCATE_LENGTH;
+  const displayBody = itemBody != null
+    ? isBodyExpanded || !bodyIsTruncated
+      ? itemBody
+      : itemBody.slice(0, BODY_TRUNCATE_LENGTH) + "..."
+    : null;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, delay: index * 0.04, ease: [0.25, 1, 0.5, 1] }}
-      className="glass group relative overflow-hidden rounded-xl transition-all duration-150 hover:border-le-accent/30 hover:shadow-[0_0_32px_rgba(232,168,73,0.06)]"
+      className={`glass group relative rounded-xl transition-all duration-200 ${
+        isExpanded ? "ring-1 ring-le-accent/30 overflow-visible" : "overflow-hidden glass-hover"
+      }`}
     >
       {/* Urgency color bar */}
       <div
@@ -91,39 +166,91 @@ export default function LooseEndCard({
       />
 
       <div className="p-4 pl-5">
-        <div className="flex items-start gap-3">
-          {/* Type icon */}
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-le-elevated text-le-muted">
-            {icon}
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-sm font-medium text-le-text">
-                {item.title}
-              </h3>
-              <Badge urgency={item.urgency} />
+        {/* Clickable header area */}
+        <div
+          className={onToggleExpand ? "cursor-pointer" : undefined}
+          onClick={onToggleExpand}
+          role={onToggleExpand ? "button" : undefined}
+          tabIndex={onToggleExpand ? 0 : undefined}
+          onKeyDown={onToggleExpand ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleExpand(); } } : undefined}
+        >
+          <div className="flex items-start gap-3">
+            {/* Type icon */}
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-le-elevated text-le-muted">
+              {icon}
             </div>
 
-            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-le-muted">
-              {item.description}
-            </p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="truncate text-sm font-medium text-le-text">
+                  {item.title}
+                </h3>
+                {/* Importance score badge for emails */}
+                {importanceScore && (
+                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-le-accent/15 px-1.5 text-[10px] font-bold tabular-nums text-le-accent">
+                    {importanceScore}
+                  </span>
+                )}
+                <Badge urgency={item.urgency} />
+              </div>
 
-            {/* AI Suggestion */}
-            {item.aiSuggestion && (
-              <p className="mt-2 text-xs italic text-le-accent/80">
-                {item.aiSuggestion}
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-le-muted">
+                {item.description}
               </p>
-            )}
-            {suggestionsLoading && !item.aiSuggestion && (
-              <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-le-accent/10" />
-            )}
 
-            {/* Meta info */}
-            <div className="mt-2 flex items-center gap-3">
-              <span className="text-[11px] text-le-muted/60">{label}</span>
-              <span className="text-le-border">|</span>
-              <span className="text-[11px] text-le-muted/60">{item.age}</span>
+              {/* AI Suggestion */}
+              {item.aiSuggestion && (
+                <p className="mt-2 text-xs italic text-le-accent/80">
+                  {item.aiSuggestion}
+                </p>
+              )}
+              {suggestionsLoading && !item.aiSuggestion && (
+                <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-le-accent/10" />
+              )}
+
+              {/* Meta info */}
+              <div className="mt-2 flex items-center gap-3">
+                <span className="text-[11px] text-le-muted/60">{label}</span>
+                <span className="text-le-border">|</span>
+                <span className="text-[11px] text-le-muted/60">{item.age}</span>
+                {isExpanded && (
+                  <span className="ml-auto text-[10px] text-le-muted/40">
+                    Press Esc to collapse
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Dismiss button — visible on hover */}
+              {onDismiss && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+                  className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-md text-le-muted/0 transition-all duration-150 hover:bg-le-elevated hover:text-le-muted group-hover:text-le-muted/40"
+                  title="Dismiss — won't show again"
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                    <path d="M5.28 4.22a.75.75 0 00-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 101.06 1.06L8 9.06l2.72 2.72a.75.75 0 101.06-1.06L9.06 8l2.72-2.72a.75.75 0 00-1.06-1.06L8 6.94 5.28 4.22z" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Expand chevron */}
+              {onToggleExpand && (
+                <div className="mt-1 text-le-muted/40 transition-transform duration-200">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    className={`h-3.5 w-3.5 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M4.22 6.22a.75.75 0 011.06 0L8 8.94l2.72-2.72a.75.75 0 111.06 1.06l-3.25 3.25a.75.75 0 01-1.06 0L4.22 7.28a.75.75 0 010-1.06z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -150,6 +277,95 @@ export default function LooseEndCard({
             ))}
           </div>
         )}
+
+        {/* Expanded body content */}
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="mt-4 border-t border-le-border/30 pt-4">
+                {/* Body content */}
+                <div className="max-h-60 overflow-y-auto overscroll-contain rounded-lg border border-le-border/40 bg-le-void/50 p-3">
+                  {isLoadingBody ? (
+                    <div className="space-y-2">
+                      <div className="h-3 w-full animate-pulse rounded bg-le-elevated/60" />
+                      <div className="h-3 w-4/5 animate-pulse rounded bg-le-elevated/60" />
+                      <div className="h-3 w-3/5 animate-pulse rounded bg-le-elevated/60" />
+                      <div className="h-3 w-2/3 animate-pulse rounded bg-le-elevated/60" />
+                    </div>
+                  ) : displayBody ? (
+                    item.type === "slack" ? (
+                      <div className="max-h-48 space-y-1.5 overflow-y-auto overscroll-contain rounded pr-1">
+                        {displayBody.split("\n").filter(Boolean).map((line, i) => {
+                          const boldMatch = line.match(/^\*\*(.+?)\*\*:\s*(.*)/);
+                          if (boldMatch) {
+                            return (
+                              <div key={i} className="rounded-md bg-le-elevated/40 px-2.5 py-1.5">
+                                <span className="text-xs font-semibold text-le-text">{boldMatch[1]}</span>
+                                <span className="ml-1.5 text-xs text-le-text/80">{boldMatch[2]}</span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <p key={i} className="text-xs text-le-text/70">{line}</p>
+                          );
+                        })}
+                        {bodyIsTruncated && (
+                          <button
+                            onClick={() => setIsBodyExpanded((v) => !v)}
+                            className="mt-1 text-[10px] font-medium text-le-accent hover:text-le-accent/80 transition-colors"
+                          >
+                            {isBodyExpanded ? "Show less" : "Show more"}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto overscroll-contain rounded pr-1">
+                        <p className="whitespace-pre-wrap text-xs leading-relaxed text-le-text/70">
+                          {displayBody}
+                        </p>
+                        {bodyIsTruncated && (
+                          <button
+                            onClick={() => setIsBodyExpanded((v) => !v)}
+                            className="mt-1 text-[10px] font-medium text-le-accent hover:text-le-accent/80 transition-colors"
+                          >
+                            {isBodyExpanded ? "Show less" : "Show more"}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    <p className="text-xs italic text-le-muted">No content available.</p>
+                  )}
+                </div>
+
+                {/* Source info */}
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="text-[11px] text-le-muted">Source:</span>
+                  <span className="text-[11px] text-le-text">{item.source}</span>
+                </div>
+
+                {/* Inline ActionConfirmSheet */}
+                <AnimatePresence>
+                  {confirmAction && confirmAction.item.id === item.id && onConfirm && onCancelConfirm && (
+                    <ActionConfirmSheet
+                      item={confirmAction.item}
+                      actionId={confirmAction.actionId}
+                      onConfirm={onConfirm}
+                      onCancel={onCancelConfirm}
+                      isPending={isPending || false}
+                    />
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );

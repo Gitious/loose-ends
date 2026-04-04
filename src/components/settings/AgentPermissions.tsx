@@ -26,11 +26,16 @@ interface SlackPermissions {
   can_send: boolean;
 }
 
+interface AgentAutonomy {
+  auto_act: boolean;
+}
+
 interface UserPermissions {
   gmail: GmailPermissions;
   calendar: CalendarPermissions;
   github: GitHubPermissions;
   slack: SlackPermissions;
+  autonomy: AgentAutonomy;
   _fgaMode?: "api" | "local";
 }
 
@@ -151,6 +156,7 @@ const defaultPerms: UserPermissions = {
   calendar: { can_read: true, can_create: false, can_delete: false },
   github: { can_read: true, can_comment: false, can_approve: false },
   slack: { can_read: true, can_send: false },
+  autonomy: { auto_act: false },
 };
 
 export default function AgentPermissions() {
@@ -283,6 +289,46 @@ export default function AgentPermissions() {
           })}
         </div>
       )}
+
+      {/* Agent Autonomy — separate from capability permissions */}
+      <div className="mt-6 pt-5 border-t border-le-border/20">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-le-text">Agent Autonomy</h3>
+            <p className="text-[11px] text-le-muted mt-0.5">Let the agent act on its own — no per-action approval needed</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between rounded-xl bg-le-void/40 border border-le-border/15 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-le-elevated">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-le-muted">
+                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <span className="text-xs font-medium text-le-text">Auto-act on suggestions</span>
+              <p className="text-[10px] text-le-muted/60 mt-0.5">Let the agent execute low-risk suggestions automatically</p>
+            </div>
+          </div>
+          <Toggle
+            checked={permissions.autonomy?.auto_act ?? false}
+            onChange={(v) => handleToggle("autonomy" as ServiceName, "auto_act", v)}
+            label="Auto-act on suggestions"
+          />
+        </div>
+
+        {permissions.autonomy?.auto_act && (
+          <p className="mt-2 text-[10px] text-amber-400/60 px-1">
+            Junk cleanup and other low-risk actions will auto-execute with an 8-second countdown you can cancel.
+          </p>
+        )}
+      </div>
 
       {/* FGA badge */}
       <div className="flex items-center justify-center mt-6 pt-4 border-t border-le-border/20">

@@ -7,7 +7,6 @@ export async function POST(req: Request) {
   const session = await auth0.getSession();
   if (!session) return new Response("Unauthorized", { status: 401 });
 
-  // FGA check: gmail.can_reply
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "gmail", "can_reply");
   if (!allowed) {
@@ -25,7 +24,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { threadId, to, subject, body, messageId } = await req.json();
+  const { threadId, to, subject, body, messageId, sendDirectly } = await req.json();
   if (!to || !subject || !body) {
     return Response.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -55,41 +54,82 @@ export async function POST(req: Request) {
 
   const mimeResult = buildMimeMessage({ to, from, subject, body, inReplyTo: messageId });
 
-  // Create a draft (safer than sending directly)
-  const draftRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      message: { raw: mimeResult.raw, threadId },
-    }),
-  });
+  if (sendDirectly) {
+    // Send the email directly
+    const sendRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        raw: mimeResult.raw,
+        threadId,
+      }),
+    });
 
-  if (!draftRes.ok) {
-    const err = await draftRes.text();
+    if (!sendRes.ok) {
+      const err = await sendRes.text();
+      await logAction({
+        userId,
+        action: "email.send",
+        service: "gmail",
+        target: messageId,
+        details: `Send failed: ${err.slice(0, 100)}`,
+        permitted: true,
+        success: false,
+      });
+      return Response.json({ error: `Failed to send: ${err}` }, { status: 500 });
+    }
+
+    const sent = await sendRes.json();
+    await logAction({
+      userId,
+      action: "email.send",
+      service: "gmail",
+      target: messageId,
+      details: `Email sent to ${to}`,
+      permitted: true,
+      success: true,
+    });
+    return Response.json({ success: true, sent: true, messageId: sent.id });
+  } else {
+    // Create a draft
+    const draftRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: { raw: mimeResult.raw, threadId },
+      }),
+    });
+
+    if (!draftRes.ok) {
+      const err = await draftRes.text();
+      await logAction({
+        userId,
+        action: "email.reply",
+        service: "gmail",
+        target: messageId,
+        details: `Draft creation failed: ${err.slice(0, 100)}`,
+        permitted: true,
+        success: false,
+      });
+      return Response.json({ error: `Failed to create draft: ${err}` }, { status: 500 });
+    }
+
+    const draft = await draftRes.json();
     await logAction({
       userId,
       action: "email.reply",
       service: "gmail",
       target: messageId,
-      details: `Draft creation failed: ${err.slice(0, 100)}`,
+      details: `Draft created for reply to ${to}`,
       permitted: true,
-      success: false,
+      success: true,
     });
-    return Response.json({ error: `Failed to create draft: ${err}` }, { status: 500 });
+    return Response.json({ success: true, sent: false, draftId: draft.id });
   }
-
-  const draft = await draftRes.json();
-  await logAction({
-    userId,
-    action: "email.reply",
-    service: "gmail",
-    target: messageId,
-    details: `Draft created for reply to ${to}`,
-    permitted: true,
-    success: true,
-  });
-  return Response.json({ success: true, draftId: draft.id });
 }

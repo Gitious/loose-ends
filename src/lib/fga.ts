@@ -32,9 +32,8 @@ import {
   type ClientCheckRequest,
   ConsistencyPreference,
 } from "@openfga/sdk";
-import fs from "fs/promises";
-import path from "path";
-import { getDataDir, sanitizeUserId } from "./storage";
+import sql, { ensureTables } from "./db";
+import { sanitizeUserId } from "./storage";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,11 +72,16 @@ export interface SlackPermissions {
   can_send: boolean;
 }
 
+export interface AgentAutonomy {
+  auto_act: boolean;
+}
+
 export interface UserPermissions {
   gmail: GmailPermissions;
   calendar: CalendarPermissions;
   github: GitHubPermissions;
   slack: SlackPermissions;
+  autonomy: AgentAutonomy;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,37 +228,30 @@ export function defaultPermissions(): UserPermissions {
     calendar: { can_read: true, can_create: false, can_delete: false },
     github: { can_read: true, can_comment: false, can_approve: false },
     slack: { can_read: true, can_send: false },
+    autonomy: { auto_act: false },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Local file helpers (fallback mode)
-// ---------------------------------------------------------------------------
-
-const PERMISSIONS_DIR = path.join(getDataDir(), "permissions");
-
-function filePath(userId: string): string {
-  return path.join(PERMISSIONS_DIR, `${sanitizeUserId(userId)}.json`);
-}
-
-async function ensureDir(): Promise<void> {
-  await fs.mkdir(PERMISSIONS_DIR, { recursive: true });
-}
-
-// ---------------------------------------------------------------------------
-// Local store implementation
+// Local DB store implementation (Neon Postgres fallback mode)
 // ---------------------------------------------------------------------------
 
 async function loadPermissionsLocal(userId: string): Promise<UserPermissions> {
   try {
-    const raw = await fs.readFile(filePath(userId), "utf-8");
-    const data = JSON.parse(raw) as UserPermissions;
+    await ensureTables();
+    const key = sanitizeUserId(userId);
+    const rows = await sql`SELECT data FROM permissions WHERE user_id = ${key}`;
+    if (rows.length === 0) {
+      return defaultPermissions();
+    }
+    const data = rows[0].data as Partial<UserPermissions>;
     const defaults = defaultPermissions();
     return {
       gmail: { ...defaults.gmail, ...data.gmail },
       calendar: { ...defaults.calendar, ...data.calendar },
       github: { ...defaults.github, ...data.github },
       slack: { ...defaults.slack, ...data.slack },
+      autonomy: { ...defaults.autonomy, ...(data as any).autonomy },
     };
   } catch {
     return defaultPermissions();
@@ -275,7 +272,7 @@ async function updatePermissionsLocal(
     >
   >
 ): Promise<UserPermissions> {
-  await ensureDir();
+  await ensureTables();
 
   const current = await loadPermissionsLocal(userId);
 
@@ -291,11 +288,13 @@ async function updatePermissionsLocal(
     }
   }
 
-  await fs.writeFile(
-    filePath(userId),
-    JSON.stringify(current, null, 2),
-    "utf-8"
-  );
+  const key = sanitizeUserId(userId);
+  await sql`
+    INSERT INTO permissions (user_id, data)
+    VALUES (${key}, ${JSON.stringify(current)}::jsonb)
+    ON CONFLICT (user_id)
+    DO UPDATE SET data = ${JSON.stringify(current)}::jsonb
+  `;
   return current;
 }
 

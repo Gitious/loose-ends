@@ -1,6 +1,6 @@
 import { convertToModelMessages, streamText, UIMessage, tool, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { setAIContext, getAccessTokenFromTokenVault } from "@auth0/ai-vercel";
+import { setAIContext, getAccessTokenFromTokenVault, getAsyncAuthorizationCredentials } from "@auth0/ai-vercel";
 import { AuthorizationPendingInterrupt, AsyncAuthorizationInterrupt } from "@auth0/ai/interrupts";
 import type { ToolWrapper } from "@auth0/ai-vercel";
 import { TokenVaultInterrupt } from "@auth0/ai/interrupts";
@@ -9,7 +9,7 @@ import { auth0 } from "@/lib/auth0";
 import { withGoogleConnection, withGitHubConnection, withSlackConnection } from "@/lib/auth0-ai";
 import { withCIBA } from "@/lib/ciba";
 import { buildMimeMessage } from "@/lib/gmail-mime";
-import { loadMemories, appendMemory } from "@/lib/memory";
+import { loadMemories, appendMemory, deleteMemory } from "@/lib/memory";
 import { loadPermissions, defaultPermissions, type UserPermissions, type ServiceName } from "@/lib/fga";
 import { logAction } from "@/lib/audit";
 
@@ -58,6 +58,24 @@ function auditServiceId(serviceName: string): string {
  *
  * Every execution is also audit-logged via logAction.
  */
+
+/**
+ * FAIL-CLOSED CIBA guard. Call at the top of every Tier 3 tool execute().
+ * If CIBA credentials were not obtained (i.e. the user did not approve via
+ * Guardian push), this throws an error and the tool does NOT execute.
+ * This is a defense-in-depth check — even if the withCIBA wrapper fails
+ * to intercept, the tool itself refuses to run without proof of approval.
+ */
+function requireCIBAApproval(): void {
+  const creds = getAsyncAuthorizationCredentials();
+  if (!creds || !creds.accessToken) {
+    throw new Error(
+      "CIBA authorization required but not obtained. " +
+      "Please approve the action on your phone via Auth0 Guardian."
+    );
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function safeTool(wrapper: ToolWrapper, baseTool: any, serviceName: string) {
   const wrapped = wrapper(baseTool);
@@ -96,32 +114,38 @@ function safeTool(wrapper: ToolWrapper, baseTool: any, serviceName: string) {
         if (TokenVaultInterrupt.isInterrupt(err)) {
           throw err;
         }
-        // CIBA: user hasn't approved yet — tell the agent to inform the user
+        // CIBA: let Auth0 AI SDK handle the async authorization flow.
+        // These interrupts MUST propagate so the framework can block/poll
+        // for Guardian approval — swallowing them kills the CIBA flow.
         if (err instanceof AuthorizationPendingInterrupt || err instanceof AsyncAuthorizationInterrupt) {
-          console.log(`[CIBA] Authorization pending for ${serviceName}:`, err?.message);
+          console.log(`[CIBA] Authorization pending for ${serviceName} — re-throwing for AI SDK`);
           logAction({
             userId,
             action: `${service}.ciba_pending`,
             service,
             details: "CIBA authorization pending — push notification sent",
             permitted: true,
-            success: false,
+            success: true,
           }).catch(() => {});
-          return {
-            pending: true,
-            message: `⏳ A push notification has been sent to your phone via Auth0 Guardian. Please approve the action, then ask me to try again.`,
-          };
+          throw err;
         }
         const msg = err?.message ?? String(err);
-        console.error(`[${serviceName}] Token Vault error:`, msg);
+        const isCIBAError = msg.includes("Guardian") || msg.includes("CIBA") || msg.includes("Action blocked");
+        console.error(`[${serviceName}] ${isCIBAError ? "CIBA" : "Token Vault"} error:`, msg);
         logAction({
           userId,
-          action: `${service}.execute`,
+          action: isCIBAError ? `${service}.ciba_denied` : `${service}.execute`,
           service,
           details: `Error: ${msg}`.slice(0, 200),
-          permitted: true,
+          permitted: !isCIBAError,
           success: false,
         }).catch(() => {});
+        if (isCIBAError) {
+          return {
+            error: msg,
+            denied: true,
+          };
+        }
         return {
           looseEnds: [],
           error: `${serviceName} is not connected. Please go to Settings and connect your ${serviceName} account.`,
@@ -170,7 +194,7 @@ const scanGmail = safeTool(
         // Check each message thread for replies
         for (const msg of messages.slice(0, 15)) {
           const msgRes = await fetch(
-            `${GMAIL_API}/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            `${GMAIL_API}/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=List-Unsubscribe&metadataHeaders=Precedence`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
           if (!msgRes.ok) continue;
@@ -200,18 +224,65 @@ const scanGmail = safeTool(
           const ageMs = Date.now() - new Date(date).getTime();
           const ageDays = Math.floor(ageMs / 86400000);
 
+          // Compute importance score (inline version of scoreEmailImportance)
+          const to = headers.find((h: any) => h.name === "To")?.value || "";
+          const cc = headers.find((h: any) => h.name === "Cc")?.value || "";
+          const subjectLower = subject.toLowerCase();
+          const listUnsub = headers.find((h: any) => h.name === "List-Unsubscribe");
+          const precedence = (headers.find((h: any) => h.name === "Precedence")?.value || "").toLowerCase();
+          const labels: string[] = msgData.labelIds || [];
+          const threadMsgCount = threadData.messages?.length || 1;
+
+          let importanceScore = 50;
+          if (labels.includes("CATEGORY_PROMOTIONS")) importanceScore -= 40;
+          if (labels.includes("CATEGORY_SOCIAL")) importanceScore -= 30;
+          if (labels.includes("CATEGORY_UPDATES")) importanceScore -= 20;
+          if (labels.includes("CATEGORY_FORUMS")) importanceScore -= 15;
+          if (listUnsub) importanceScore -= 25;
+          if (precedence === "bulk" || precedence === "list") importanceScore -= 20;
+          if (/noreply|no-reply|donotreply|notifications?@/i.test(from)) importanceScore -= 35;
+          if (/urgent|asap|immediately|time.?sensitive/i.test(subjectLower)) importanceScore += 20;
+          if (/action.?required|action.?needed|please.?respond|please.?reply/i.test(subjectLower)) importanceScore += 15;
+          if (/deadline|due.?date|eod|end.?of.?day|by.?today|by.?tomorrow/i.test(subjectLower)) importanceScore += 15;
+          if (/important|critical|high.?priority/i.test(subjectLower)) importanceScore += 15;
+          if (/re:|fwd:/i.test(subjectLower)) importanceScore += 5;
+          if (to.toLowerCase().includes(userEmail.toLowerCase())) importanceScore += 15;
+          if (cc.toLowerCase().includes(userEmail.toLowerCase())) importanceScore -= 10;
+          const userDomain = userEmail.split("@")[1];
+          const senderDomain = (from.match(/@([^>]+)/)?.[1] || "").toLowerCase();
+          if (userDomain && senderDomain === userDomain) importanceScore += 20;
+          if (threadMsgCount >= 3) importanceScore += 10;
+          if (threadMsgCount >= 6) importanceScore += 10;
+          if (labels.includes("IMPORTANT")) importanceScore += 15;
+          if (labels.includes("STARRED")) importanceScore += 20;
+          importanceScore = Math.max(0, Math.min(100, importanceScore));
+
+          let urgency: "red" | "yellow" | "green";
+          if (importanceScore >= 90) {
+            urgency = "red";
+          } else if (importanceScore >= 80) {
+            urgency = ageDays > 1 ? "red" : "yellow";
+          } else if (importanceScore >= 65) {
+            urgency = ageDays > 3 ? "red" : ageDays > 1 ? "yellow" : "green";
+          } else if (importanceScore >= 40) {
+            urgency = ageDays > 7 ? "red" : ageDays > 3 ? "yellow" : "green";
+          } else {
+            urgency = "green";
+          }
+
           looseEnds.push({
             id: `gmail-${msg.id}`,
             type: "email",
             title: subject,
             description: `From ${from.split("<")[0].trim()} · no reply sent`,
-            urgency: ageDays > 7 ? "red" : ageDays > 3 ? "yellow" : "green",
+            urgency,
             age: ageDays === 0 ? "today" : `${ageDays}d ago`,
             source: from,
             actionLabel: "Draft Reply",
             meta: {
               threadId: msgData.threadId,
               messageId: msg.id,
+              importanceScore: String(importanceScore),
             },
           });
         }
@@ -560,32 +631,30 @@ const searchSlackMessages = safeTool(
 );
 
 // Slack: send a message
-const sendSlackMessage = safeTool(
-  withSlackConnection,
-  tool({
-    description: "Send a message to a Slack channel or DM. Requires the channel ID and message text. Always confirm with the user before sending.",
-    inputSchema: z.object({
-      channel: z.string().describe("The Slack channel ID to send to"),
-      text: z.string().describe("The message text to send"),
-      thread_ts: z.string().optional().describe("Thread timestamp to reply in a thread"),
-    }),
-    execute: async ({ channel, text, thread_ts }) => {
-      const accessToken = getAccessTokenFromTokenVault();
-      const body: any = { channel, text };
-      if (thread_ts) body.thread_ts = thread_ts;
-      const res = await fetch("https://slack.com/api/chat.postMessage", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) return { error: "Failed to send message" };
-      const data = await res.json();
-      if (!data.ok) return { error: data.error };
-      return { success: true, ts: data.ts, channel: data.channel };
-    },
+// Raw tool — wrapped with CIBA + safeTool at registration time
+const sendSlackMessageBase = tool({
+  description: "Send a message to a Slack channel or DM. Requires the channel ID and message text. Always confirm with the user before sending.",
+  inputSchema: z.object({
+    channel: z.string().describe("The Slack channel ID to send to"),
+    text: z.string().describe("The message text to send"),
+    thread_ts: z.string().optional().describe("Thread timestamp to reply in a thread"),
   }),
-  "Slack"
-);
+  execute: async ({ channel, text, thread_ts }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+    const body: any = { channel, text };
+    if (thread_ts) body.thread_ts = thread_ts;
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { error: "Failed to send message" };
+    const data = await res.json();
+    if (!data.ok) return { error: data.error };
+    return { success: true, ts: data.ts, channel: data.channel };
+  },
+});
 
 // ---------------------------------------------------------------------------
 // GMAIL ACTION TOOLS
@@ -708,109 +777,73 @@ const draftEmailReply = safeTool(
 );
 
 // Compose and send a NEW email (not a reply)
-const sendNewEmail = safeTool(
-  withGoogleConnection,
-  tool({
-    description:
-      "Compose and send a brand new email (not a reply to an existing thread). This SENDS immediately — always confirm with the user before calling. For replies to existing emails, use sendEmailReply instead.",
-    inputSchema: z.object({
-      to: z.string().describe("Recipient email address"),
-      subject: z.string().describe("Email subject line"),
-      body: z.string().describe("Plain-text body of the email"),
-    }),
-    execute: async ({ to, subject, body }) => {
-      const accessToken = getAccessTokenFromTokenVault();
-      const senderEmail = await getGmailSenderEmail(accessToken);
-
-      const mime = buildMimeMessage({
-        to,
-        from: senderEmail,
-        subject,
-        body,
-      });
-
-      const res = await fetch(`${GMAIL_API}/messages/send`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ raw: mime.raw }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        return { error: `Failed to send email: ${res.status} — ${errText}` };
-      }
-
-      const sent = await res.json();
-      return {
-        success: true,
-        messageId: sent.id,
-        message: `Email sent to ${to} with subject "${subject}".`,
-      };
-    },
+// Raw tool — wrapped with CIBA + safeTool at registration time
+const sendNewEmailBase = tool({
+  description:
+    "Compose and send a brand new email (not a reply to an existing thread). This SENDS immediately — always confirm with the user before calling. For replies to existing emails, use sendEmailReply instead.",
+  inputSchema: z.object({
+    to: z.string().describe("Recipient email address"),
+    subject: z.string().describe("Email subject line"),
+    body: z.string().describe("Plain-text body of the email"),
   }),
-  "Gmail"
-);
+  execute: async ({ to, subject, body }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+    const senderEmail = await getGmailSenderEmail(accessToken);
 
-// Send an email reply directly
-const sendEmailReply = safeTool(
-  withGoogleConnection,
-  tool({
-    description:
-      "Send a reply to an email directly via Gmail. Use getEmailDetails first to get the required headers. This SENDS the email immediately — always confirm with the user before calling this tool.",
-    inputSchema: z.object({
-      threadId: z.string().describe("Gmail thread ID to reply in"),
-      to: z.string().describe("Recipient email address"),
-      subject: z.string().describe("Email subject (Re: prefix will be added if missing)"),
-      body: z.string().describe("Plain-text body of the reply"),
-      inReplyTo: z.string().optional().describe("Message-ID header of the message being replied to"),
-      references: z.string().optional().describe("References header value for threading"),
-      from: z.string().optional().describe("Sender email (defaults to authenticated user)"),
-    }),
-    execute: async ({ threadId, to, subject, body, inReplyTo, references, from }) => {
-      const accessToken = getAccessTokenFromTokenVault();
-      const senderEmail = await getGmailSenderEmail(accessToken, from);
+    const mime = buildMimeMessage({ to, from: senderEmail, subject, body });
 
-      const mime = buildMimeMessage({
-        to,
-        from: senderEmail,
-        subject,
-        body,
-        inReplyTo,
-        references,
-        threadId,
-      });
+    const res = await fetch(`${GMAIL_API}/messages/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: mime.raw }),
+    });
 
-      const res = await fetch(`${GMAIL_API}/messages/send`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          raw: mime.raw,
-          threadId,
-        }),
-      });
+    if (!res.ok) {
+      const errText = await res.text();
+      return { error: `Failed to send email: ${res.status} — ${errText}` };
+    }
 
-      if (!res.ok) {
-        const errText = await res.text();
-        return { error: `Failed to send email: ${res.status} — ${errText}` };
-      }
+    const sent = await res.json();
+    return { success: true, messageId: sent.id, message: `Email sent to ${to} with subject "${subject}".` };
+  },
+});
 
-      const sent = await res.json();
-      return {
-        success: true,
-        messageId: sent.id,
-        threadId: sent.threadId,
-        message: `Email sent successfully to ${to}.`,
-      };
-    },
+// Raw tool — wrapped with CIBA + safeTool at registration time
+const sendEmailReplyBase = tool({
+  description:
+    "Send a reply to an email directly via Gmail. Use getEmailDetails first to get the required headers. This SENDS the email immediately — always confirm with the user before calling this tool.",
+  inputSchema: z.object({
+    threadId: z.string().describe("Gmail thread ID to reply in"),
+    to: z.string().describe("Recipient email address"),
+    subject: z.string().describe("Email subject (Re: prefix will be added if missing)"),
+    body: z.string().describe("Plain-text body of the reply"),
+    inReplyTo: z.string().optional().describe("Message-ID header of the message being replied to"),
+    references: z.string().optional().describe("References header value for threading"),
+    from: z.string().optional().describe("Sender email (defaults to authenticated user)"),
   }),
-  "Gmail"
-);
+  execute: async ({ threadId, to, subject, body, inReplyTo, references, from }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+    const senderEmail = await getGmailSenderEmail(accessToken, from);
+
+    const mime = buildMimeMessage({ to, from: senderEmail, subject, body, inReplyTo, references, threadId });
+
+    const res = await fetch(`${GMAIL_API}/messages/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: mime.raw, threadId }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { error: `Failed to send email: ${res.status} — ${errText}` };
+    }
+
+    const sent = await res.json();
+    return { success: true, messageId: sent.id, threadId: sent.threadId, message: `Email sent successfully to ${to}.` };
+  },
+});
 
 // ---------------------------------------------------------------------------
 // CALENDAR ACTION TOOLS
@@ -916,75 +949,99 @@ const commentOnGitHub = safeTool(
   "GitHub"
 );
 
-// Trash an email
-const trashEmail = safeTool(
-  withGoogleConnection,
-  tool({
-    description:
-      "Move an email to trash. Use this for promotional/spam emails the user wants to clean up. Always confirm with the user before trashing.",
-    inputSchema: z.object({
-      messageId: z.string().describe("The Gmail message ID to trash"),
-      reason: z.string().describe("Why this email should be trashed"),
-    }),
-    execute: async ({ messageId }) => {
-      const accessToken = getAccessTokenFromTokenVault();
-      const res = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/trash`,
-        { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (!res.ok) return { error: "Failed to trash email" };
-      return { success: true, message: "Email moved to trash" };
-    },
+// Raw tools — wrapped with CIBA + safeTool at registration time
+const trashEmailBase = tool({
+  description:
+    "Move an email to trash. Use this for promotional/spam emails the user wants to clean up.",
+  inputSchema: z.object({
+    messageId: z.string().describe("The Gmail message ID to trash"),
+    reason: z.string().describe("Why this email should be trashed"),
   }),
-  "Gmail"
-);
+  execute: async ({ messageId }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/trash`,
+      { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) return { error: "Failed to trash email" };
+    return { success: true, message: "Email moved to trash" };
+  },
+});
 
-// Submit a PR review
-const reviewPullRequest = safeTool(
-  withGitHubConnection,
-  tool({
-    description:
-      "Submit a review on a GitHub pull request. Supports APPROVE, REQUEST_CHANGES, or COMMENT. Always confirm the review action and body with the user before calling this tool.",
-    inputSchema: z.object({
-      owner: z.string().describe("Repository owner"),
-      repo: z.string().describe("Repository name"),
-      prNumber: z.number().describe("Pull request number"),
-      event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]).describe("Review action: APPROVE, REQUEST_CHANGES, or COMMENT"),
-      body: z.string().describe("Review comment body"),
-    }),
-    execute: async ({ owner, repo, prNumber, event, body }) => {
-      const accessToken = getAccessTokenFromTokenVault();
-
-      const res = await fetch(
-        `${GH_API}/repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/vnd.github.v3+json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ event, body }),
-        }
-      );
-
-      if (!res.ok) {
-        const errText = await res.text();
-        return { error: `Failed to submit review: ${res.status} — ${errText}` };
+const bulkTrashJunkBase = tool({
+  description:
+    "Trash multiple junk/promotional/spam emails in one operation. Use this instead of calling trashEmail repeatedly. Takes an array of message IDs and trashes them all at once. Only ONE push notification is sent for the whole batch.",
+  inputSchema: z.object({
+    messageIds: z.array(z.string()).describe("Array of Gmail message IDs to trash"),
+    reason: z.string().describe("Why these emails should be trashed, e.g. 'Promotional/spam cleanup'"),
+  }),
+  execute: async ({ messageIds }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+    const res = await fetch(
+      `${GMAIL_API}/messages/batchModify`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: messageIds, addLabelIds: ["TRASH"], removeLabelIds: ["INBOX"] }),
       }
+    );
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      return { error: `Failed to bulk trash: ${res.status} ${err}`.slice(0, 200) };
+    }
+    return {
+      success: true,
+      count: messageIds.length,
+      message: `${messageIds.length} junk email${messageIds.length !== 1 ? "s" : ""} moved to trash.`,
+    };
+  },
+});
 
-      const review = await res.json();
-      return {
-        success: true,
-        reviewId: review.id,
-        htmlUrl: review.html_url,
-        state: review.state,
-        message: `Review (${event}) submitted on ${owner}/${repo}#${prNumber}.`,
-      };
-    },
+// Raw tool — wrapped with CIBA + safeTool at registration time
+const reviewPullRequestBase = tool({
+  description:
+    "Submit a review on a GitHub pull request. Supports APPROVE, REQUEST_CHANGES, or COMMENT. Always confirm the review action and body with the user before calling this tool.",
+  inputSchema: z.object({
+    owner: z.string().describe("Repository owner"),
+    repo: z.string().describe("Repository name"),
+    prNumber: z.number().describe("Pull request number"),
+    event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]).describe("Review action: APPROVE, REQUEST_CHANGES, or COMMENT"),
+    body: z.string().describe("Review comment body"),
   }),
-  "GitHub"
-);
+  execute: async ({ owner, repo, prNumber, event, body }) => {
+    requireCIBAApproval();
+    const accessToken = getAccessTokenFromTokenVault();
+
+    const res = await fetch(
+      `${GH_API}/repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ event, body }),
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { error: `Failed to submit review: ${res.status} — ${errText}` };
+    }
+
+    const review = await res.json();
+    return {
+      success: true,
+      reviewId: review.id,
+      htmlUrl: review.html_url,
+      state: review.state,
+      message: `Review (${event}) submitted on ${owner}/${repo}#${prNumber}.`,
+    };
+  },
+});
 
 // ---------------------------------------------------------------------------
 // ROUTE HANDLER
@@ -1042,6 +1099,161 @@ export async function POST(req: Request) {
     },
   });
 
+  // ---------------------------------------------------------------------------
+  // recallMemories tool — lets the agent search/filter saved memories
+  // ---------------------------------------------------------------------------
+  const recallMemories = tool({
+    description:
+      "Search and filter your saved memories about the user. Use this BEFORE answering questions about the user's habits, contacts, preferences, or history with a service. Returns matching memories.",
+    inputSchema: z.object({
+      query: z.string().optional().describe("Keyword to filter memories by (searches content text)"),
+      source: z
+        .enum(["gmail", "calendar", "github", "slack", "chat", "agent"])
+        .optional()
+        .describe("Filter memories by source service"),
+    }),
+    execute: async ({ query, source }) => {
+      try {
+        const all = await loadMemories(userId);
+        let filtered = all;
+        if (source) {
+          filtered = filtered.filter((m) => m.source === source);
+        }
+        if (query) {
+          const q = query.toLowerCase();
+          filtered = filtered.filter((m) => m.content.toLowerCase().includes(q));
+        }
+        return {
+          memories: filtered.map((m) => ({
+            id: m.id,
+            content: m.content,
+            source: m.source,
+            createdAt: m.createdAt,
+          })),
+          count: filtered.length,
+          total: all.length,
+        };
+      } catch (err: any) {
+        console.error("recallMemories error:", err);
+        return { error: `Failed to recall memories: ${err?.message ?? String(err)}`, memories: [] };
+      }
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // forgetMemory tool — lets the agent delete outdated memories
+  // ---------------------------------------------------------------------------
+  const forgetMemory = tool({
+    description:
+      "Delete an outdated or incorrect memory by its ID. Use recallMemories first to find the memory ID. Use this when information is no longer accurate or relevant.",
+    inputSchema: z.object({
+      memoryId: z.string().describe("The ID of the memory to delete"),
+    }),
+    execute: async ({ memoryId }) => {
+      try {
+        const deleted = await deleteMemory(userId, memoryId);
+        if (deleted) {
+          return { success: true, message: `Memory ${memoryId} deleted.` };
+        }
+        return { success: false, message: `Memory ${memoryId} not found or already deleted.` };
+      } catch (err: any) {
+        console.error("forgetMemory error:", err);
+        return { error: `Failed to delete memory: ${err?.message ?? String(err)}` };
+      }
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // getUserContext tool — gives the agent situational awareness
+  // ---------------------------------------------------------------------------
+  const getUserContext = tool({
+    description:
+      "Get a rich context snapshot: current date/time, memory count, connected services, and permission summary. Call this at the start of a conversation or when you need situational awareness.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      try {
+        const now = new Date();
+        const memories = await loadMemories(userId);
+        const perms = await loadPermissions(userId).catch(() => defaultPermissions());
+
+        // Determine which services are effectively connected based on permissions
+        const services: { name: string; read: boolean; write: boolean }[] = [
+          { name: "gmail", read: perms.gmail.can_read, write: perms.gmail.can_reply || perms.gmail.can_delete },
+          { name: "calendar", read: perms.calendar.can_read, write: perms.calendar.can_create || perms.calendar.can_delete },
+          { name: "github", read: perms.github.can_read, write: perms.github.can_comment || perms.github.can_approve },
+          { name: "slack", read: perms.slack.can_read, write: perms.slack.can_send },
+        ];
+
+        // Summarize memories by source
+        const memsBySource: Record<string, number> = {};
+        for (const m of memories) {
+          memsBySource[m.source] = (memsBySource[m.source] || 0) + 1;
+        }
+
+        return {
+          currentTime: now.toISOString(),
+          dayOfWeek: now.toLocaleDateString("en-US", { weekday: "long" }),
+          date: now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+          memorySummary: {
+            total: memories.length,
+            bySource: memsBySource,
+          },
+          services,
+          userId,
+        };
+      } catch (err: any) {
+        console.error("getUserContext error:", err);
+        return { error: `Failed to get context: ${err?.message ?? String(err)}` };
+      }
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // suggestAction — agent calls this to present cross-service suggestions
+  // as interactive cards in the chat UI (rendered by SuggestionCard on client)
+  // ---------------------------------------------------------------------------
+  const suggestAction = tool({
+    description:
+      "Present a proactive cross-service suggestion to the user as an interactive card. " +
+      "Use this when you notice an opportunity across services — e.g. a scheduling email " +
+      "where you should check the calendar, or a confirmed time slot that needs a calendar " +
+      "event, or a Slack message referencing an email. The frontend renders this as a " +
+      "clickable card with Accept/Dismiss. When the user accepts, they will tell you to " +
+      "proceed and you should then call the actual action tool.",
+    inputSchema: z.object({
+      type: z.enum([
+        "check_calendar",
+        "create_event",
+        "check_email",
+        "search_slack",
+        "reply_email",
+        "trash_email",
+        "review_pr",
+        "send_slack",
+      ]).describe("The type of action being suggested"),
+      title: z.string().describe("Short action title, e.g. 'Check calendar for Tuesday availability'"),
+      description: z.string().describe("Why this suggestion is being made — the cross-service context"),
+      sourceService: z.enum(["gmail", "calendar", "github", "slack"]).describe("Service where the trigger was found"),
+      targetService: z.enum(["gmail", "calendar", "github", "slack"]).describe("Service where the action would happen"),
+      tier: z.enum(["auto", "confirm", "ciba"]).describe("Security tier: auto (no approval), confirm (chat confirm), ciba (phone approval via Guardian)"),
+      acceptLabel: z.string().optional().describe("Custom label for the accept button, e.g. 'Book Meeting' or 'Check Calendar'"),
+      actionParams: z.record(z.string(), z.string()).optional().describe("Key parameters for the action if accepted (shown as context on the card)"),
+    }),
+    execute: async ({ type, title, description, sourceService, targetService, tier, acceptLabel, actionParams }) => {
+      return {
+        suggestion: true,
+        type,
+        title,
+        description,
+        sourceService,
+        targetService,
+        tier,
+        acceptLabel: acceptLabel || undefined,
+        actionParams: actionParams || {},
+      };
+    },
+  });
+
   // Load memories and permissions in parallel
   let memoriesBlock = "";
   let permissionsBlock = "";
@@ -1091,7 +1303,7 @@ export async function POST(req: Request) {
   // Hard-enforce FGA: only include tools the user has permissions for
   const p = userPermissions ?? defaultPermissions();
   // FGA permissions loaded — tools will be conditionally registered below
-  const tools: Record<string, any> = { saveMemory };
+  const tools: Record<string, any> = { saveMemory, recallMemories, forgetMemory, getUserContext, suggestAction };
 
   // Tier 1 — Auto (read/scan, no approval needed)
   if (p.gmail.can_read) { tools.scanGmail = scanGmail; tools.getEmailDetails = getEmailDetails; }
@@ -1105,10 +1317,22 @@ export async function POST(req: Request) {
   if (p.github.can_comment) { tools.commentOnGitHub = commentOnGitHub; }
 
   // Tier 3 — CIBA step-up auth (send/approve/delete, requires push notification approval)
-  if (p.gmail.can_reply) { tools.sendNewEmail = withCIBA(sendNewEmail); tools.sendEmailReply = withCIBA(sendEmailReply); }
-  if (p.gmail.can_delete) { tools.trashEmail = withCIBA(trashEmail); }
-  if (p.github.can_approve) { tools.reviewPullRequest = withCIBA(reviewPullRequest); }
-  if (p.slack.can_send) { tools.sendSlackMessage = withCIBA(sendSlackMessage); }
+  // CRITICAL: withCIBA wraps the raw tool() FIRST, then safeTool wraps the CIBA-protected tool.
+  // This ensures @auth0/ai-vercel sees a proper AI SDK tool object and can intercept execution.
+  if (p.gmail.can_reply) {
+    tools.sendNewEmail = safeTool(withGoogleConnection, withCIBA(sendNewEmailBase), "Gmail");
+    tools.sendEmailReply = safeTool(withGoogleConnection, withCIBA(sendEmailReplyBase), "Gmail");
+  }
+  if (p.gmail.can_delete) {
+    tools.trashEmail = safeTool(withGoogleConnection, withCIBA(trashEmailBase), "Gmail");
+    tools.bulkTrashJunk = safeTool(withGoogleConnection, withCIBA(bulkTrashJunkBase), "Gmail");
+  }
+  if (p.github.can_approve) {
+    tools.reviewPullRequest = safeTool(withGitHubConnection, withCIBA(reviewPullRequestBase), "GitHub");
+  }
+  if (p.slack.can_send) {
+    tools.sendSlackMessage = safeTool(withSlackConnection, withCIBA(sendSlackMessageBase), "Slack");
+  }
 
   // Tools registered based on FGA permissions
 
@@ -1117,51 +1341,44 @@ export async function POST(req: Request) {
   try {
     const result = streamText({
       model: anthropic("claude-sonnet-4-20250514"),
-      system: `You are "Loose Ends" — an AI agent that finds things users have dropped across Gmail, Calendar, GitHub, and Slack, and helps them take action.
+      system: `You are "Loose Ends" — a concise AI agent for Gmail, Calendar, GitHub, and Slack.
 
-SCANNING TOOLS (call all 4 when user asks to scan/find loose ends):
-- scanGmail: find unreplied emails (returns threadId and messageId in each result's meta)
-- scanCalendar: find calendar conflicts and unprepared meetings
-- scanGitHub: find pending PR reviews and stale issues (returns owner, repo, number in each result's meta)
-- scanSlack: find unanswered DMs and mentions
+TOOLS:
+Scan: scanGmail, scanCalendar, scanGitHub, scanSlack
+Gmail: getEmailDetails, draftEmailReply, sendEmailReply, sendNewEmail, trashEmail, bulkTrashJunk
+Calendar: createCalendarEvent
+GitHub: commentOnGitHub, reviewPullRequest
+Slack: listSlackChannels, readSlackMessages, searchSlackMessages, sendSlackMessage
+Memory: saveMemory, recallMemories, forgetMemory
+Context: getUserContext
+Other: suggestAction
 
-SLACK TOOLS (use when user asks about Slack specifically):
-- listSlackChannels: list channels the user is in
-- readSlackMessages: read messages from a channel (needs channel ID — list channels first if needed)
-- searchSlackMessages: search messages across all channels
-- sendSlackMessage: send a message to a channel or DM (ACTION — confirm first!)
+CRITICAL RULES:
+1. BE CONCISE. Short responses. No over-explaining.
+2. JUNK/SPAM CLEANUP: Use bulkTrashJunk (NOT trashEmail) for multiple emails. If previous scan results are still in the conversation, use those messageIds directly — do NOT rescan.
+3. Tier 3 tools (send, trash, approve, post) require Auth0 Guardian approval on the user's phone. When you call one, tell the user: "Check your phone to approve this action." The tool blocks until they approve. NEVER say an action was completed unless the tool returned { success: true }.
+4. If a tool returns { denied: true } or { error: "...Guardian..." }, tell the user the action was BLOCKED and they need to approve on their phone or check Settings.
+5. NEVER hallucinate success. If the tool returned an error, say it failed. Do not say "deleted" or "sent" unless the tool explicitly confirmed success.
+6. Before replying to emails: call getEmailDetails to get headers and body.
+7. Only suggest actions you can actually perform. Never suggest "unsubscribe."
 
-GMAIL ACTION TOOLS:
-- sendNewEmail: compose and send a brand new email to anyone. CIBA step-up: sends push notification for approval.
-- getEmailDetails: fetch full headers + body of a Gmail message by ID. Call this BEFORE drafting or sending a reply.
-- draftEmailReply: create a draft reply in Gmail (goes to Drafts folder, not sent). Needs threadId, to, subject, body.
-- sendEmailReply: send a reply immediately via Gmail. Needs threadId, to, subject, body.
-- trashEmail: move an email to trash. Use for promotional/spam emails the user wants to clean up. Needs messageId, reason.
+CROSS-SERVICE BEHAVIOR:
+- Scheduling emails → check calendar (scanCalendar) before drafting a reply
+- Confirmed time slot → suggest createCalendarEvent with attendees
+- Slack mentions email → offer to check Gmail
+- Use suggestAction to present cross-service suggestions as interactive cards
 
-CALENDAR ACTION TOOLS:
-- createCalendarEvent: create a new calendar event with summary, times, and optional attendees.
+SCAN RESULTS: After scanning, briefly list results by urgency. Don't rescan if you already have results in this conversation.
 
-GITHUB ACTION TOOLS:
-- commentOnGitHub: post a comment on a GitHub issue or PR. Needs owner, repo, issueNumber, body.
-- reviewPullRequest: submit a PR review (APPROVE, REQUEST_CHANGES, or COMMENT). Needs owner, repo, prNumber, event, body.
+MEMORY BEHAVIOR:
+- Before answering questions about the user's habits, contacts, or preferences, call recallMemories first.
+- When you observe patterns across scans (e.g. user always ignores emails from X, recurring meetings with Y, stale PRs from a specific repo), save them with saveMemory.
+- Use forgetMemory to clean up outdated or incorrect memories (recall first to get the ID).
+- Call getUserContext when you need situational awareness (current date/time, connected services, memory stats).
 
-MEMORY TOOL:
-- saveMemory: save a learned insight about the user's patterns or preferences. Call when you notice recurring behaviors.
+FGA (Fine-Grained Authorization): If a tool is not available to you, it means the user disabled that permission. Tell them to enable it in Settings > Agent Permissions.
 
-ACTION SECURITY TIERS:
-- Tier 1 (Auto): Scanning and reading — no approval needed.
-- Tier 2 (Chat confirm): Drafting, creating events, commenting — describe what you'll do and wait for user to say "yes" in chat.
-- Tier 3 (CIBA step-up): Sending emails, approving PRs, posting Slack messages, deleting emails — CALL THE TOOL IMMEDIATELY. The tool itself handles authorization by sending a push notification to the user's phone via Auth0 Guardian. Do NOT wait for chat confirmation for Tier 3 — just call the tool and it will block until the user approves on their phone.
-
-IMPORTANT: When the user asks you to trash, send, or delete something, CALL THE TOOL RIGHT AWAY. Do not describe what you plan to do and wait — the CIBA push notification IS the confirmation mechanism. The tool will wait for approval automatically.
-
-After scanning, present results ranked by urgency:
-🔴 [URGENT] Title — description (time)
-🟡 [ATTENTION] Title — description (time)
-🟢 [LOW] Title — description (time)
-
-If a tool returns an error about reconnecting, tell the user to go to Settings and connect that service.
-Be concise and direct.${memoriesBlock}${permissionsBlock}`,
+If a tool returns an error about reconnecting, tell the user to go to Settings.${memoriesBlock}${permissionsBlock}`,
       messages: modelMessages,
       tools,
       stopWhen: stepCountIs(10),

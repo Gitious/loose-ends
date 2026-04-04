@@ -82,7 +82,7 @@ export default function RecentActivity() {
   if (!loading && entries.length === 0) return null;
 
   return (
-    <section className="glass rounded-2xl px-5 py-4 mt-5">
+    <section className="glass rounded-2xl px-5 py-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-le-text">Recent Activity</h3>

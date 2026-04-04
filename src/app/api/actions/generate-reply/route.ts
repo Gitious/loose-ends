@@ -141,39 +141,104 @@ Write a casual, conversational Slack reply. Match the tone of the conversation. 
   // --- Email reply generation ---
   let emailBody = "";
   let fetchError = "";
+  let calendarContext = "";
   const senderName = (item.meta?.from || item.source || "").split("<")[0].trim();
   const senderEmail = (item.meta?.from || item.source || "").match(/<([^>]+)>/)?.[1] || item.meta?.from || item.source || "";
   const subject = item.meta?.subject || item.title;
 
-  if (item.type === "email" && item.meta?.messageId) {
-    try {
-      const result = await auth0.getAccessTokenForConnection({ connection: "google-oauth2" });
-      const token = result.token;
+  // Fetch Google token once — used for both email body and calendar
+  let googleToken: string | null = null;
+  try {
+    const result = await auth0.getAccessTokenForConnection({ connection: "google-oauth2" });
+    googleToken = result.token;
+  } catch (err) {
+    console.log("[generate-reply] Google token unavailable:", err);
+  }
 
-      const gmailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.meta.messageId}?format=full`;
-      const msgRes = await fetch(gmailUrl, {
-        headers: { Authorization: `Bearer ${token}` },
+  // Fetch email body and calendar events in parallel
+  if (googleToken) {
+    // Fetch email body
+    if (item.type === "email" && item.meta?.messageId) {
+      try {
+        const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.meta.messageId}?format=full`, {
+          headers: { Authorization: `Bearer ${googleToken}` },
+        });
+        if (msgRes.ok) {
+          const msgData = await msgRes.json();
+          emailBody = extractBody(msgData.payload || {});
+          if (emailBody.length > 2000) {
+            emailBody = emailBody.slice(0, 2000) + "\n\n[... email truncated for brevity ...]";
+          }
+        } else {
+          fetchError = `Gmail API returned ${msgRes.status}`;
+        }
+      } catch (err) {
+        fetchError = `Email fetch failed: ${err}`;
+      }
+    }
+
+    // Fetch calendar events from ALL calendars (not just primary)
+    const now = new Date();
+    const timeMin = now.toISOString();
+    const timeMax = new Date(now.getTime() + 3 * 86400000).toISOString();
+    try {
+      const calListRes = await fetch(`https://www.googleapis.com/calendar/v3/users/me/calendarList`, {
+        headers: { Authorization: `Bearer ${googleToken}` },
+      });
+      let calIds = ["primary"];
+      if (calListRes.ok) {
+        const calListData = await calListRes.json();
+        const ids = (calListData.items || [])
+          .filter((c: { deleted?: boolean }) => !c.deleted)
+          .map((c: { id: string }) => c.id);
+        if (ids.length > 0) calIds = ids;
+      }
+
+      const allEvents: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }[] = [];
+      const seenIds = new Set<string>();
+      await Promise.all(calIds.map(async (calId) => {
+        const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&orderBy=startTime&maxResults=20`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${googleToken}` } });
+        if (res.ok) {
+          const data = await res.json();
+          for (const e of (data.items || [])) {
+            if (e.id && !seenIds.has(e.id)) {
+              seenIds.add(e.id);
+              allEvents.push(e);
+            }
+          }
+        }
+      }));
+
+      // Sort by start time
+      allEvents.sort((a, b) => {
+        const sa = new Date(a.start?.dateTime || a.start?.date || 0).getTime();
+        const sb = new Date(b.start?.dateTime || b.start?.date || 0).getTime();
+        return sa - sb;
       });
 
-      if (msgRes.ok) {
-        const msgData = await msgRes.json();
-        emailBody = extractBody(msgData.payload || {});
-
-        // Truncate to avoid huge prompts
-        if (emailBody.length > 2000) {
-          emailBody = emailBody.slice(0, 2000) + "\n\n[... email truncated for brevity ...]";
-        }
+      if (allEvents.length > 0) {
+        calendarContext = allEvents.map((e) => {
+          const start = e.start?.dateTime || e.start?.date || "";
+          const end = e.end?.dateTime || e.end?.date || "";
+          return `- ${e.summary || "(no title)"}: ${start} to ${end}`;
+        }).join("\n");
       } else {
-        const errText = await msgRes.text();
-        fetchError = `Gmail API returned ${msgRes.status}: ${errText.slice(0, 200)}`;
+        calendarContext = "(No events scheduled — the user's calendar is completely free for the next 3 days)";
       }
     } catch (err) {
-      fetchError = `Exception fetching email: ${err instanceof Error ? err.message : String(err)}`;
+      console.log("[generate-reply] Calendar fetch error:", err);
     }
+  } else {
+    console.log("[generate-reply] No Google token — skipping email body and calendar fetch");
   }
 
   // Build the prompt — different strategies depending on whether we have the email body
   let prompt: string;
+
+  const calendarBlock = calendarContext
+    ? `\nUser's calendar (next 3 days) — this is LIVE data, use it:\n${calendarContext}\n\nIMPORTANT: You have the user's real calendar. If the email mentions scheduling, meetings, or availability, give a DEFINITIVE answer based on this data. Say "1pm works, see you then" or "I have a conflict at 1pm, how about 2pm?" — NEVER say "I need to check my calendar" or "let me get back to you on that."`
+    : "\n(Calendar data was not available. If the email asks about scheduling, suggest the sender propose a few time options rather than saying you'll check your calendar.)";
 
   if (emailBody) {
     // We have the actual email content — generate a relevant reply
@@ -189,10 +254,12 @@ ${emailBody}
 User's name: ${userFirstName}
 User context (things we know about them):
 ${memoryContext}
+${calendarBlock}
 
 Instructions:
 - Your reply MUST directly address the specific content, questions, or topics in the email above.
 - Do NOT invent or hallucinate any topics, meetings, events, or context not present in the email.
+- If the email asks about scheduling or meeting times, use the calendar data above to give a definitive answer (yes/no/suggest alternatives). Do NOT say "I need to check my calendar" — you already have the calendar.
 - If the email is promotional or marketing (from a brand, newsletter, automated notification), respond with ONLY: "No reply needed — this is a promotional email."
 - If the email is a notification (shipping update, account alert, etc.), respond with ONLY: "No reply needed — this is an automated notification."
 - If the email requires a genuine reply, write a professional response that directly addresses what the sender wrote.
@@ -211,13 +278,15 @@ Description: ${item.description}
 User's name: ${userFirstName}
 User context (things we know about them):
 ${memoryContext}
+${calendarBlock}
 
 Instructions:
 - Based ONLY on the subject line and sender info above, write a brief, safe reply.
 - Do NOT make up specific details, topics, or events that you don't know about.
+- If the subject suggests scheduling or meetings and calendar data is available above, use it to give a real answer.
 - If the subject suggests this is promotional or automated (e.g., from a brand, "order confirmation", "shipping update"), respond with ONLY: "No reply needed — this appears to be an automated email."
-- If it seems like a real email that needs a reply, write a short, generic-but-relevant response based on the subject line. For example, if the subject is "Meeting tomorrow", you could say "Thanks for the heads up — looking forward to it."
-- Acknowledge that you're working from limited context. Keep it short and safe.
+- If it seems like a real email that needs a reply, write a short, generic-but-relevant response based on the subject line.
+- Keep it short and safe.
 - Sign off with: ${userFirstName}`;
   }
 

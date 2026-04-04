@@ -1,5 +1,8 @@
 import { auth0 } from "@/lib/auth0";
-import { loadPermissions } from "@/lib/fga";
+import { loadPermissions, checkPermission } from "@/lib/fga";
+import sql, { ensureTables } from "@/lib/db";
+import { sanitizeUserId } from "@/lib/storage";
+import { sendSlackDM, formatLooseEndsForSlack } from "@/lib/slack-notify";
 import type { LooseEnd, LooseEndAction, JunkEmail } from "@/lib/types";
 
 export const maxDuration = 30;
@@ -9,13 +12,24 @@ const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const GH_API = "https://api.github.com";
 const SLACK_API = "https://slack.com/api";
 
+const SCHEDULING_RE = /\b(meet|meeting|call|catch up|sync|1[:\-]?on[:\-]?1|coffee|lunch|dinner|schedule|slot|available|availability|free at|block.?(time|calendar)|calendar invite|let'?s (talk|chat|connect|hop on)|(?:at|by|around|before|after)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday))\b/i;
+
+function looksLikeScheduling(item: LooseEnd): boolean {
+  const subject = item.meta?.subject || item.title || "";
+  const desc = item.description || "";
+  return SCHEDULING_RE.test(subject) || SCHEDULING_RE.test(desc);
+}
+
 function addActions(item: LooseEnd): LooseEnd {
   const actions: LooseEndAction[] = [];
   let deepLink: string | null = null;
 
   switch (item.type) {
     case "email":
-      actions.push({ id: "reply", label: "Draft Reply", variant: "primary" });
+      actions.push({ id: "reply", label: "Reply", variant: "primary" });
+      if (looksLikeScheduling(item)) {
+        actions.push({ id: "create-event", label: "Create Event", variant: "secondary" });
+      }
       actions.push({ id: "trash", label: "Trash", variant: "secondary" });
       if (item.meta?.threadId) {
         deepLink = `https://mail.google.com/mail/#inbox/${item.meta.threadId}`;
@@ -37,6 +51,9 @@ function addActions(item: LooseEnd): LooseEnd {
       break;
     case "slack":
       actions.push({ id: "reply", label: "Reply", variant: "primary" });
+      if (looksLikeScheduling(item)) {
+        actions.push({ id: "create-event", label: "Create Event", variant: "secondary" });
+      }
       if (item.meta?.permalink) deepLink = item.meta.permalink;
       actions.push({ id: "open", label: "Open", variant: "ghost" });
       break;
@@ -55,6 +72,7 @@ function scoreEmailImportance(
   const from = headers.find((h: any) => h.name === "From")?.value || "";
   const to = headers.find((h: any) => h.name === "To")?.value || "";
   const cc = headers.find((h: any) => h.name === "Cc")?.value || "";
+  const subject = (headers.find((h: any) => h.name === "Subject")?.value || "").toLowerCase();
   const listUnsub = headers.find((h: any) => h.name === "List-Unsubscribe");
   const precedence = (headers.find((h: any) => h.name === "Precedence")?.value || "").toLowerCase();
   const labels = msgData.labelIds || [];
@@ -68,7 +86,14 @@ function scoreEmailImportance(
   if (precedence === "bulk" || precedence === "list") score -= 20;
   if (/noreply|no-reply|donotreply|notifications?@/i.test(from)) score -= 35;
 
-  // Positive signals
+  // Positive signals — subject keywords
+  if (/urgent|asap|immediately|time.?sensitive/i.test(subject)) score += 20;
+  if (/action.?required|action.?needed|please.?respond|please.?reply/i.test(subject)) score += 15;
+  if (/deadline|due.?date|eod|end.?of.?day|by.?today|by.?tomorrow/i.test(subject)) score += 15;
+  if (/important|critical|high.?priority/i.test(subject)) score += 15;
+  if (/re:|fwd:/i.test(subject)) score += 5; // reply/forward = conversation
+
+  // Positive signals — recipient and sender
   if (to.toLowerCase().includes(userEmail.toLowerCase())) score += 15;
   if (cc.toLowerCase().includes(userEmail.toLowerCase())) score -= 10;
 
@@ -114,7 +139,8 @@ async function scanGmailDirect(token: string): Promise<{ looseEnds: LooseEnd[]; 
 
   // Batch-fetch message metadata in parallel (batches of 10)
   const BATCH = 10;
-  const seenThreads = new Set<string>();
+  const seenThreads = new Set<string>();       // for deduping thread metadata fetches
+  const threadHasLooseEnd = new Set<string>();  // one loose end per thread
   for (let i = 0; i < messages.length; i += BATCH) {
     const batch = messages.slice(i, i + BATCH);
     const results = await Promise.all(
@@ -146,22 +172,35 @@ async function scanGmailDirect(token: string): Promise<{ looseEnds: LooseEnd[]; 
 
       if (from.includes(userEmail)) continue;
 
+      // Only one loose end per thread — skip if we already have one
+      const tid = msgData.threadId || msg.threadId;
+      if (tid && threadHasLooseEnd.has(tid)) continue;
+
       const threadMsgCount = threadData?.messages?.length || 1;
-      const hasReply = threadData?.messages?.some((m: { payload?: { headers?: { name: string; value: string }[] } }) =>
-        m.payload?.headers?.find((h) => h.name === "From")?.value?.includes(userEmail)
-      );
-      if (hasReply) continue;
+      // Check if the LAST message in the thread is from the user.
+      // If yes, we replied last and it's not a loose end.
+      // If the last message is from someone else, they replied back — it's a loose end again.
+      if (threadData?.messages?.length) {
+        const lastMsg = threadData.messages[threadData.messages.length - 1];
+        const lastFrom = lastMsg?.payload?.headers?.find((h: { name: string }) => h.name === "From")?.value || "";
+        if (lastFrom.includes(userEmail)) continue;
+      }
 
       const importanceScore = scoreEmailImportance(msgData, threadMsgCount, userEmail);
 
       if (importanceScore < 25) {
         junkEmails.push({ id: `gmail-${msg.id}`, messageId: msg.id, subject, from: from.split("<")[0].trim(), importanceScore });
+        if (tid) threadHasLooseEnd.add(tid);
         continue;
       }
 
       const ageDays = Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
       let urgency: "red" | "yellow" | "green";
-      if (importanceScore >= 65) {
+      if (importanceScore >= 90) {
+        urgency = "red";
+      } else if (importanceScore >= 80) {
+        urgency = ageDays > 1 ? "red" : "yellow";
+      } else if (importanceScore >= 65) {
         urgency = ageDays > 3 ? "red" : ageDays > 1 ? "yellow" : "green";
       } else if (importanceScore >= 40) {
         urgency = ageDays > 7 ? "red" : ageDays > 3 ? "yellow" : "green";
@@ -180,6 +219,7 @@ async function scanGmailDirect(token: string): Promise<{ looseEnds: LooseEnd[]; 
         actionLabel: "Draft Reply",
         meta: { threadId: msgData.threadId, messageId: msg.id, rfcMessageId: messageId, from, subject, importanceScore: String(importanceScore) },
       });
+      if (tid) threadHasLooseEnd.add(tid);
     }
   }
   return { looseEnds, junkEmails };
@@ -192,41 +232,84 @@ async function scanCalendarDirect(token: string): Promise<LooseEnd[]> {
   const dayAgo = new Date(now.getTime() - 24 * 3600000);
   const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
 
-  const [upRes, pastRes] = await Promise.all([
-    fetch(`${CALENDAR_API}/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${weekAhead.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=30`, { headers: { Authorization: `Bearer ${token}` } }),
-    fetch(`${CALENDAR_API}/calendars/primary/events?timeMin=${dayAgo.toISOString()}&timeMax=${now.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=10`, { headers: { Authorization: `Bearer ${token}` } }),
-  ]);
+  // Fetch all user calendars, then query each for events
+  const calListRes = await fetch(`${CALENDAR_API}/users/me/calendarList`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const calendarIds: string[] = ["primary"];
+  if (calListRes.ok) {
+    const calListData = await calListRes.json();
+    const ids = (calListData.items || [])
+      .filter((c: { deleted?: boolean }) => !c.deleted)
+      .map((c: { id: string }) => c.id);
+    if (ids.length > 0) calendarIds.splice(0, calendarIds.length, ...ids);
+  }
+
+  // Query all calendars in parallel (upcoming + past for each)
+  const allUpcoming: any[] = [];
+  const allPast: any[] = [];
+  await Promise.all(calendarIds.map(async (calId) => {
+    const encodedId = encodeURIComponent(calId);
+    const [upRes, pastRes] = await Promise.all([
+      fetch(`${CALENDAR_API}/calendars/${encodedId}/events?timeMin=${now.toISOString()}&timeMax=${weekAhead.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=30`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${CALENDAR_API}/calendars/${encodedId}/events?timeMin=${dayAgo.toISOString()}&timeMax=${now.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=10`, { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+    if (upRes.ok) {
+      const d = await upRes.json();
+      allUpcoming.push(...(d.items || []));
+    }
+    if (pastRes.ok) {
+      const d = await pastRes.json();
+      allPast.push(...(d.items || []));
+    }
+  }));
+
+  // Sort by start time
+  const sortByStart = (a: any, b: any) => {
+    const sa = new Date(a.start?.dateTime || a.start?.date || 0).getTime();
+    const sb = new Date(b.start?.dateTime || b.start?.date || 0).getTime();
+    return sa - sb;
+  };
+  allUpcoming.sort(sortByStart);
+  allPast.sort(sortByStart);
+
+  // Dedupe by event ID (same event can appear on multiple calendars)
+  const seenIds = new Set<string>();
+  function dedup(events: any[]): any[] {
+    return events.filter((e) => {
+      if (!e.id || seenIds.has(e.id)) return false;
+      seenIds.add(e.id);
+      return true;
+    });
+  }
+  const upEvents = dedup(allUpcoming);
+  const pastEvents = dedup(allPast);
 
   const looseEnds: LooseEnd[] = [];
 
-  // Past events ·recent meetings worth following up
-  if (pastRes.ok) {
-    const pastData = await pastRes.json();
-    for (const event of (pastData.items || []).slice(-5)) {
-      if (!event.summary) continue;
-      const startField = event.start?.dateTime || event.start?.date;
-      if (!startField) continue;
-      const start = new Date(startField);
-      const hoursAgo = (now.getTime() - start.getTime()) / 3600000;
-      const attendees = event.attendees?.length || 0;
-      const desc = attendees > 1 ? `${attendees} attendees ·ended ${Math.floor(hoursAgo)}h ago` : `Ended ${Math.floor(hoursAgo)}h ago`;
-      looseEnds.push({
-        id: `cal-past-${event.id}`,
-        type: "calendar",
-        title: event.summary,
-        description: desc,
-        urgency: "green",
-        age: `${Math.floor(hoursAgo)}h ago`,
-        source: event.organizer?.email || "Calendar",
-        actionLabel: "Follow Up",
-        meta: { eventId: event.id, htmlLink: event.htmlLink || "" },
-      });
-    }
+  // Past events — recent meetings worth following up
+  for (const event of pastEvents.slice(-5)) {
+    if (!event.summary) continue;
+    const startField = event.start?.dateTime || event.start?.date;
+    if (!startField) continue;
+    const start = new Date(startField);
+    const hoursAgo = (now.getTime() - start.getTime()) / 3600000;
+    const attendees = event.attendees?.length || 0;
+    const desc = attendees > 1 ? `${attendees} attendees ·ended ${Math.floor(hoursAgo)}h ago` : `Ended ${Math.floor(hoursAgo)}h ago`;
+    looseEnds.push({
+      id: `cal-past-${event.id}`,
+      type: "calendar",
+      title: event.summary,
+      description: desc,
+      urgency: "green",
+      age: `${Math.floor(hoursAgo)}h ago`,
+      source: event.organizer?.email || "Calendar",
+      actionLabel: "Follow Up",
+      meta: { eventId: event.id, htmlLink: event.htmlLink || "" },
+    });
   }
 
-  if (!upRes.ok) return looseEnds;
-  const data = await upRes.json();
-  const events = data.items || [];
+  const events = upEvents;
 
   // Separate today's events from later
   const todayEvents = events.filter((e: any) => {
@@ -711,12 +794,84 @@ async function scan(only?: string | null) {
     gmailScanPromise ?? Promise.resolve({ looseEnds: [], junkEmails: [] }),
   ]);
 
-  const allLooseEnds = [...gmailResult.looseEnds, ...otherResults.flat()].map(addActions);
+  let allLooseEnds = [...gmailResult.looseEnds, ...otherResults.flat()].map(addActions);
   const junkEmails = gmailResult.junkEmails;
+
+  // Filter out dismissed items
+  await ensureTables();
+  const dismissedRows = await sql`
+    SELECT item_key FROM dismissed_items WHERE user_id = ${userId}
+  `;
+  if (dismissedRows.length > 0) {
+    const dismissedKeys = new Set(dismissedRows.map((r) => r.item_key as string));
+    allLooseEnds = allLooseEnds.filter((le) => {
+      // For emails, match by threadId; for others match by item id
+      const key = le.meta?.threadId || le.id;
+      return !dismissedKeys.has(key);
+    });
+  }
 
   // Sort by urgency: red first, then yellow, then green
   const urgencyOrder: Record<string, number> = { red: 0, yellow: 1, green: 2 };
   allLooseEnds.sort((a, b) => (urgencyOrder[a.urgency] ?? 2) - (urgencyOrder[b.urgency] ?? 2));
 
+  // Auto-clean is handled client-side via the SuggestionTray countdown.
+  // The scan only finds junk — never acts on it.
+
+  // Fire-and-forget: send Slack DM alert if there are urgent (red) items
+  const redItems = allLooseEnds.filter((le) => le.urgency === "red");
+  if (redItems.length > 0 && slackToken) {
+    notifyViaSlack(userId, slackToken, allLooseEnds, junkEmails.length).catch(
+      (err) => console.error("[Slack Notify] Error:", err)
+    );
+  }
+
   return Response.json({ looseEnds: allLooseEnds, junkEmails, errors, services, denied });
+}
+
+/**
+ * Check permissions and rate-limit, then send a Slack DM alert.
+ * This runs as fire-and-forget — errors are logged, never thrown to the caller.
+ */
+async function notifyViaSlack(
+  userId: string,
+  slackToken: string,
+  looseEnds: LooseEnd[],
+  junkCount: number
+): Promise<void> {
+  // 1. Check FGA permission: slack.can_send
+  const allowed = await checkPermission(userId, "slack", "can_send");
+  if (!allowed) {
+    console.log("[Slack Notify] User lacks slack.can_send permission, skipping.");
+    return;
+  }
+
+  // 2. Rate-limit: max 1 notification per hour per user
+  await ensureTables();
+  const key = sanitizeUserId(userId);
+  const rows = await sql`
+    SELECT last_notified_at FROM autonomous_state WHERE user_id = ${key}
+  `;
+  if (rows.length > 0 && rows[0].last_notified_at) {
+    const lastNotified = new Date(rows[0].last_notified_at);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if (lastNotified > oneHourAgo) {
+      console.log("[Slack Notify] Rate-limited, last notified:", lastNotified.toISOString());
+      return;
+    }
+  }
+
+  // 3. Format and send
+  const { text, blocks } = formatLooseEndsForSlack(looseEnds, junkCount);
+  await sendSlackDM(slackToken, text, blocks);
+
+  // 4. Record the notification timestamp
+  await sql`
+    INSERT INTO autonomous_state (user_id, last_notified_at)
+    VALUES (${key}, NOW())
+    ON CONFLICT (user_id)
+    DO UPDATE SET last_notified_at = NOW()
+  `;
+
+  console.log("[Slack Notify] Alert sent successfully for user:", key);
 }

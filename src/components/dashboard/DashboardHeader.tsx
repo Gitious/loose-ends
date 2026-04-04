@@ -3,6 +3,13 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 
+const SCOPE_LABELS: Record<string, string> = {
+  email: "Gmail",
+  calendar: "Calendar",
+  github: "GitHub",
+  slack: "Slack",
+};
+
 export default function DashboardHeader({
   firstName,
   onScan,
@@ -10,6 +17,7 @@ export default function DashboardHeader({
   lastScannedAt,
   totalItems,
   urgentCount,
+  scanScope,
 }: {
   firstName: string;
   onScan: () => void;
@@ -17,10 +25,22 @@ export default function DashboardHeader({
   lastScannedAt: Date | null;
   totalItems?: number;
   urgentCount?: number;
+  scanScope?: string;
 }) {
   const timeAgo = lastScannedAt
     ? `Scanned ${Math.max(0, Math.floor((Date.now() - lastScannedAt.getTime()) / 60000))}m ago`
     : null;
+
+  const scopeLabel = scanScope ? SCOPE_LABELS[scanScope] || scanScope : null;
+
+  // Dynamic headline
+  const headline = isScanning
+    ? scopeLabel ? `Scanning ${scopeLabel}...` : "Scanning your services..."
+    : (urgentCount ?? 0) > 0
+      ? `${urgentCount} dropped thread${urgentCount === 1 ? "" : "s"} need${urgentCount === 1 ? "s" : ""} you, ${firstName}`
+      : (totalItems ?? 0) > 0
+        ? `${totalItems} loose end${totalItems === 1 ? "" : "s"} found, ${firstName}`
+        : `All clear, ${firstName}`;
 
   return (
     <motion.div
@@ -31,11 +51,11 @@ export default function DashboardHeader({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl tracking-tight">
-            Welcome back, {firstName}
+            {headline}
           </h1>
           <p className="mt-1 text-sm text-le-muted">
             {isScanning
-              ? "Scanning your services..."
+              ? scopeLabel ? `Checking ${scopeLabel}...` : "Checking all connected services..."
               : timeAgo || "Let's find everything you've dropped."}
           </p>
         </div>
@@ -54,45 +74,24 @@ export default function DashboardHeader({
           <button
             onClick={() => onScan()}
             disabled={isScanning}
-            className="flex items-center gap-2 rounded-xl bg-le-accent px-5 py-2.5 text-sm font-semibold text-le-void transition-all duration-150 hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(232,168,73,0.25)] active:scale-[0.97] disabled:opacity-50"
+            className={`flex items-center gap-2 rounded-xl bg-le-accent px-5 py-2.5 text-sm font-semibold text-le-void transition-all duration-150 hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(232,168,73,0.25)] active:scale-[0.97] disabled:opacity-50 ${!isScanning ? "scan-btn-glow" : ""}`}
           >
             {isScanning ? (
               <>
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-le-void/30 border-t-le-void" />
-                Scanning...
+                {scopeLabel ? `Scanning ${scopeLabel}...` : "Scanning..."}
               </>
             ) : (
               <>
                 <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                   <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.379 2.341 1 1 0 111.498-1.327 3.5 3.5 0 005.97-1.49 1 1 0 011.911.476zM4.688 8.576a5.5 5.5 0 019.379-2.341 1 1 0 11-1.498 1.327 3.5 3.5 0 00-5.97 1.49 1 1 0 01-1.911-.476z" clipRule="evenodd" />
                 </svg>
-                Scan Now
+                {scopeLabel ? `Scan ${scopeLabel}` : "Scan Now"}
               </>
             )}
           </button>
         </div>
       </div>
-
-      {/* Quick stats row */}
-      {!isScanning && lastScannedAt && (
-        <motion.div
-          className="mt-4 flex gap-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.1, duration: 0.15 }}
-        >
-          <div className="glass flex items-center gap-2 rounded-xl px-4 py-2">
-            <span className="text-xs text-le-muted">Total</span>
-            <span className="text-sm font-semibold text-le-text">{totalItems ?? 0}</span>
-          </div>
-          {(urgentCount ?? 0) > 0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-le-red/20 bg-le-red/5 px-4 py-2">
-              <span className="h-2 w-2 rounded-full bg-le-red" />
-              <span className="text-xs text-le-red">{urgentCount} urgent</span>
-            </div>
-          )}
-        </motion.div>
-      )}
     </motion.div>
   );
 }

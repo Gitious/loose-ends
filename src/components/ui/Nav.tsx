@@ -46,8 +46,9 @@ export default function Nav() {
         className="flex items-center gap-2.5 transition-opacity hover:opacity-80"
       >
         <Logo />
-        <span className="text-base font-semibold tracking-tight text-le-text">
+        <span className="font-display text-base tracking-tight text-le-text">
           Loose Ends
+          <span className="nav-watcher-dot" />
         </span>
       </Link>
 
