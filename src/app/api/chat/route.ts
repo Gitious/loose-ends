@@ -1355,6 +1355,9 @@ export async function POST(req: Request) {
       model: anthropic("claude-sonnet-4-20250514"),
       system: `You are "Loose Ends" — a concise AI agent for Gmail, Calendar, GitHub, and Slack.
 
+TODAY: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+TIME: ${new Date().toLocaleTimeString()}
+
 TOOLS:
 Scan: scanGmail, scanCalendar, scanGitHub, scanSlack
 Gmail: getEmailDetails, draftEmailReply, sendEmailReply, sendNewEmail, trashEmail, bulkTrashJunk

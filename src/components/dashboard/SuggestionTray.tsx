@@ -153,8 +153,24 @@ export function deriveSuggestions(
     });
   }
 
-  // 5. Scheduling suggestions are now handled by the AI intelligence layer
-  // (agentSuggestions from the suggest endpoint), not by regex/rule matching.
+  // 5. Scheduling detection fallback (when AI suggestions haven't loaded yet)
+  const SCHED_RE = /\b(meet|meeting|call|catch up|sync|coffee|lunch|schedule|available|let'?s talk)\b/i;
+  const schedulingEmail = looseEnds.find(
+    (le) => le.type === "email" && SCHED_RE.test(le.meta?.subject || le.title || "") && !result.some((s) => s.meta?.itemId === le.id)
+  );
+  if (schedulingEmail) {
+    const sender = (schedulingEmail.meta?.from || schedulingEmail.source || "").split("<")[0].trim();
+    result.push({
+      id: `schedule-${schedulingEmail.id}`,
+      kind: "schedule_event",
+      title: `Book & Reply to ${sender}`,
+      description: schedulingEmail.title,
+      service: "gmail",
+      tier: "confirm",
+      priority: 90,
+      meta: { itemId: schedulingEmail.id },
+    });
+  }
 
   // Sort by priority descending, hard cap at 4
   result.sort((a, b) => b.priority - a.priority);
@@ -439,7 +455,7 @@ export default function SuggestionTray({
       };
       // AI-generated suggestions (exclude trash_emails — handled below deterministically)
       const aiCards: Suggestion[] = agentSuggestions
-        .filter((as) => as.priority >= 50 && as.action !== "trash_emails")
+        .filter((as) => as.priority >= 30 && as.action !== "trash_emails")
         .sort((a, b) => b.priority - a.priority)
         .slice(0, 3)
         .map((as) => ({
@@ -453,6 +469,28 @@ export default function SuggestionTray({
           meta: { itemId: as.itemId || "", ...as.params },
           aiAction: as.action,
         }));
+
+      // Always add scheduling detection if AI didn't suggest book_and_reply
+      const hasBookAndReply = aiCards.some((c) => c.kind === "schedule_event");
+      if (!hasBookAndReply) {
+        const SCHED_RE = /\b(meet|meeting|call|catch up|sync|coffee|lunch|schedule|available|let'?s talk)\b/i;
+        const schedulingEmail = looseEnds.find(
+          (le) => le.type === "email" && SCHED_RE.test(le.meta?.subject || le.title || "")
+        );
+        if (schedulingEmail) {
+          const sender = (schedulingEmail.meta?.from || schedulingEmail.source || "").split("<")[0].trim();
+          aiCards.push({
+            id: `schedule-${schedulingEmail.id}`,
+            kind: "schedule_event",
+            title: `Book & Reply to ${sender}`,
+            description: schedulingEmail.title,
+            service: "gmail",
+            tier: "confirm",
+            priority: 90,
+            meta: { itemId: schedulingEmail.id },
+          });
+        }
+      }
 
       // Always show junk cleanup if there are junk emails (deterministic, not AI-dependent)
       if (junkEmails.length >= 2) {
