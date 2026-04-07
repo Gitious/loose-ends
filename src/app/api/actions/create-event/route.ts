@@ -6,7 +6,7 @@ import { checkPermission } from "@/lib/fga";
 import { logAction } from "@/lib/audit";
 import { requestCIBAApproval } from "@/lib/ciba-direct";
 import { extractBody } from "@/lib/gmail-body";
-import type { LooseEnd } from "@/lib/types";
+import type { LooseEnd, ProposedEvent } from "@/lib/types";
 
 export const maxDuration = 300; // 5 min — allows time for CIBA approval
 
@@ -17,7 +17,19 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "calendar", "can_create");
 
-  const { item, force } = (await req.json()) as { item: LooseEnd; force?: boolean };
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { item, force, proposed, skipCiba } = parsed as {
+    item: LooseEnd;
+    force?: boolean;
+    proposed?: ProposedEvent;
+    skipCiba?: boolean;
+  };
 
   if (!allowed) {
     await logAction({
@@ -34,8 +46,14 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!item) {
+  if (!item || typeof item !== "object") {
     return Response.json({ error: "Missing item" }, { status: 400 });
+  }
+
+  // Validate item.type
+  const validItemTypes = ["email", "calendar", "github", "slack"];
+  if (!validItemTypes.includes(item.type)) {
+    return Response.json({ error: "Invalid item type" }, { status: 400 });
   }
 
   let googleToken: string;
@@ -67,8 +85,8 @@ export async function POST(req: Request) {
   const subject = item.meta?.subject || item.title || "";
   const now = new Date();
 
-  // Use AI to extract event details from the email
-  const { object: eventDetails } = await generateObject({
+  // Use pre-extracted details if provided (from check-schedule), otherwise AI extract
+  const eventDetails = proposed || (await generateObject({
     model: anthropic("claude-haiku-4-5-20251001"),
     schema: z.object({
       summary: z.string().describe("Event title — short and clear"),
@@ -91,7 +109,7 @@ Instructions:
 - If no specific time, default to 10:00-11:00.
 - Include the sender as an attendee if they have an email address.
 - Make the summary concise: "Meeting with [Name]" or use the topic if mentioned.`,
-  });
+  })).object;
 
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles";
   const startDT = `${eventDetails.date}T${eventDetails.startTime}:00`;
@@ -132,36 +150,36 @@ Instructions:
     }
   }
 
-  // CIBA approval — send Guardian push before creating the event
-  const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s+\-_.,:#@]/g, "").trim();
-  const bindingMessage = sanitize(
-    `Create event: ${eventDetails.summary} on ${eventDetails.date} ${eventDetails.startTime}`
-  );
+  // CIBA approval — skip when user explicitly confirmed in-app (skipCiba=true)
+  if (!skipCiba) {
+    const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s+\-_.,:#@]/g, "").trim();
+    const bindingMessage = sanitize(
+      `Create event: ${eventDetails.summary} on ${eventDetails.date} ${eventDetails.startTime}`
+    );
 
-  console.log(`[Create Event] Requesting CIBA approval: ${bindingMessage}`);
-  const ciba = await requestCIBAApproval({
-    userId,
-    bindingMessage,
-    timeoutSeconds: 120,
-  });
-
-  if (!ciba.approved) {
-    await logAction({
+    console.log(`[Create Event] Requesting CIBA approval: ${bindingMessage}`);
+    const ciba = await requestCIBAApproval({
       userId,
-      action: "calendar.create_event",
-      service: "calendar",
-      target: eventDetails.summary,
-      details: `CIBA denied: ${ciba.error}`,
-      permitted: true,
-      success: false,
+      bindingMessage,
+      timeoutSeconds: 120,
     });
-    return Response.json({
-      approved: false,
-      error: ciba.error || "Action not approved. Check Auth0 Guardian on your phone.",
-    });
-  }
 
-  console.log(`[Create Event] CIBA approved, creating event`);
+    if (!ciba.approved) {
+      await logAction({
+        userId,
+        action: "calendar.create_event",
+        service: "calendar",
+        target: eventDetails.summary,
+        details: `CIBA denied: ${ciba.error}`,
+        permitted: true,
+        success: false,
+      });
+      return Response.json({
+        approved: false,
+        error: ciba.error || "Action not approved. Check Auth0 Guardian on your phone.",
+      });
+    }
+  }
 
   // CIBA approved — create the event
   const event = {
@@ -197,7 +215,7 @@ Instructions:
       permitted: true,
       success: false,
     });
-    return Response.json({ error: `Failed to create event: ${err}` }, { status: 500 });
+    return Response.json({ error: "Failed to create event" }, { status: 500 });
   }
 
   const created = await calRes.json();

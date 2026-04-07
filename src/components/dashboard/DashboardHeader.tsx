@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -9,6 +9,17 @@ const SCOPE_LABELS: Record<string, string> = {
   github: "GitHub",
   slack: "Slack",
 };
+
+function formatTimeAgo(date: Date): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function DashboardHeader({
   firstName,
@@ -27,10 +38,6 @@ export default function DashboardHeader({
   urgentCount?: number;
   scanScope?: string;
 }) {
-  const timeAgo = lastScannedAt
-    ? `Scanned ${Math.max(0, Math.floor((Date.now() - lastScannedAt.getTime()) / 60000))}m ago`
-    : null;
-
   const scopeLabel = scanScope ? SCOPE_LABELS[scanScope] || scanScope : null;
 
   // Dynamic headline
@@ -41,6 +48,11 @@ export default function DashboardHeader({
       : (totalItems ?? 0) > 0
         ? `${totalItems} loose end${totalItems === 1 ? "" : "s"} found, ${firstName}`
         : `All clear, ${firstName}`;
+
+  // Subtitle copy — contextual, never shows scan time
+  const subtitle = isScanning
+    ? scopeLabel ? `Checking ${scopeLabel}...` : "Checking all connected services..."
+    : "Let\u2019s find everything you\u2019ve dropped.";
 
   return (
     <motion.div
@@ -54,13 +66,43 @@ export default function DashboardHeader({
             {headline}
           </h1>
           <p className="mt-1 text-sm text-le-muted">
-            {isScanning
-              ? scopeLabel ? `Checking ${scopeLabel}...` : "Checking all connected services..."
-              : timeAgo || "Let's find everything you've dropped."}
+            {subtitle}
           </p>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Scan status badge — quiet metadata */}
+          <AnimatePresence mode="wait">
+            {isScanning ? (
+              <motion.span
+                key="scanning"
+                initial={{ opacity: 0, x: 6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -6 }}
+                transition={{ duration: 0.15 }}
+                className="flex items-center gap-1.5 text-[11px] tracking-wide text-le-muted/70 uppercase"
+              >
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inset-0 animate-ping rounded-full bg-le-accent/60" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-le-accent" />
+                </span>
+                Syncing
+              </motion.span>
+            ) : lastScannedAt ? (
+              <motion.span
+                key="status"
+                initial={{ opacity: 0, x: 6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -6 }}
+                transition={{ duration: 0.15 }}
+                className="flex items-center gap-1.5 text-[11px] tracking-wide text-le-muted/70"
+              >
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-le-green/80" />
+                {formatTimeAgo(lastScannedAt)}
+              </motion.span>
+            ) : null}
+          </AnimatePresence>
+
           <Link
             href="/settings"
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-le-elevated text-le-muted transition-colors hover:text-le-text"

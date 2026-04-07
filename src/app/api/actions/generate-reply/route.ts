@@ -16,10 +16,31 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const userName = session.user?.name || session.user?.nickname || "";
   const userFirstName = userName.split(" ")[0] || "Me";
-  const { item } = (await req.json()) as { item: LooseEnd };
 
-  if (!item) {
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { item, rescheduleContext } = parsed as {
+    item: LooseEnd;
+    rescheduleContext?: {
+      proposedTime: string;
+      conflictNames: string[];
+      freeSlots: Array<{ label: string }>;
+    };
+  };
+
+  if (!item || typeof item !== "object") {
     return Response.json({ error: "Missing item" }, { status: 400 });
+  }
+
+  // Validate item.type
+  const validItemTypes = ["email", "slack", "calendar", "github"];
+  if (!validItemTypes.includes(item.type)) {
+    return Response.json({ error: "Invalid item type" }, { status: 400 });
   }
 
   // FGA check: email needs can_reply, slack needs can_send
@@ -140,7 +161,6 @@ Write a casual, conversational Slack reply. Match the tone of the conversation. 
 
   // --- Email reply generation ---
   let emailBody = "";
-  let fetchError = "";
   let calendarContext = "";
   const senderName = (item.meta?.from || item.source || "").split("<")[0].trim();
   const senderEmail = (item.meta?.from || item.source || "").match(/<([^>]+)>/)?.[1] || item.meta?.from || item.source || "";
@@ -169,11 +189,9 @@ Write a casual, conversational Slack reply. Match the tone of the conversation. 
           if (emailBody.length > 2000) {
             emailBody = emailBody.slice(0, 2000) + "\n\n[... email truncated for brevity ...]";
           }
-        } else {
-          fetchError = `Gmail API returned ${msgRes.status}`;
         }
-      } catch (err) {
-        fetchError = `Email fetch failed: ${err}`;
+      } catch {
+        // Proceed without email body
       }
     }
 
@@ -240,9 +258,20 @@ Write a casual, conversational Slack reply. Match the tone of the conversation. 
     ? `\nUser's calendar (next 3 days) — this is LIVE data, use it:\n${calendarContext}\n\nIMPORTANT: You have the user's real calendar. If the email mentions scheduling, meetings, or availability, give a DEFINITIVE answer based on this data. Say "1pm works, see you then" or "I have a conflict at 1pm, how about 2pm?" — NEVER say "I need to check my calendar" or "let me get back to you on that."`
     : "\n(Calendar data was not available. If the email asks about scheduling, suggest the sender propose a few time options rather than saying you'll check your calendar.)";
 
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const tomorrowStr = new Date(now.getTime() + 86400000).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
   if (emailBody) {
     // We have the actual email content — generate a relevant reply
     prompt = `You are helping a user write an email reply. You MUST reply to the ACTUAL content of the email below. Do NOT make up topics, events, or context that is not in the email.
+
+CURRENT DATE AND TIME:
+- Today is: ${todayStr}
+- Current time: ${timeStr}
+- Tomorrow is: ${tomorrowStr}
+Use these dates when the email says "today", "tomorrow", "this week", etc.
 
 From: ${senderName} <${senderEmail}>
 Subject: ${subject}
@@ -259,10 +288,12 @@ ${calendarBlock}
 Instructions:
 - Your reply MUST directly address the specific content, questions, or topics in the email above.
 - Do NOT invent or hallucinate any topics, meetings, events, or context not present in the email.
-- If the email asks about scheduling or meeting times, use the calendar data above to give a definitive answer (yes/no/suggest alternatives). Do NOT say "I need to check my calendar" — you already have the calendar.
-- If the email is promotional or marketing (from a brand, newsletter, automated notification), respond with ONLY: "No reply needed — this is a promotional email."
-- If the email is a notification (shipping update, account alert, etc.), respond with ONLY: "No reply needed — this is an automated notification."
-- If the email requires a genuine reply, write a professional response that directly addresses what the sender wrote.
+- When the email mentions scheduling: check the calendar data above for ACTUAL conflicts at the proposed time. A 10pm event does NOT conflict with a 2pm meeting — only overlapping times are conflicts.
+- If the proposed time is FREE on the calendar, confirm it: "2pm works, see you then."
+- If there IS a real conflict at the exact proposed time, mention it and suggest alternatives from free slots.
+- Do NOT say "I need to check my calendar" — you already have the calendar.
+- If the email is promotional or marketing, respond with ONLY: "No reply needed — this is a promotional email."
+- If the email is a notification, respond with ONLY: "No reply needed — this is an automated notification."
 - Match the formality level of the original email.
 - Start with an appropriate greeting.
 - Keep it concise — reply to what was asked, don't pad with filler.
@@ -270,6 +301,11 @@ Instructions:
   } else {
     // We could NOT fetch the email body -- be transparent about it
     prompt = `You are helping a user write an email reply, but we could only retrieve the email metadata (not the full body).
+
+CURRENT DATE AND TIME:
+- Today is: ${todayStr}
+- Current time: ${timeStr}
+- Tomorrow is: ${tomorrowStr}
 
 From: ${senderName} <${senderEmail}>
 Subject: ${subject}
@@ -288,6 +324,25 @@ Instructions:
 - If it seems like a real email that needs a reply, write a short, generic-but-relevant response based on the subject line.
 - Keep it short and safe.
 - Sign off with: ${userFirstName}`;
+  }
+
+  // Inject reschedule context if provided
+  if (rescheduleContext) {
+    const rescheduleBlock = `
+RESCHEDULE CONTEXT:
+The sender proposed ${rescheduleContext.proposedTime} but it conflicts with: ${rescheduleContext.conflictNames.join(', ')}.
+The user has these free slots:
+${rescheduleContext.freeSlots.map(s => `- ${s.label}`).join('\n')}
+
+Write a polite reply explaining the conflict (without naming the conflicting event) and suggesting the free time slots above as alternatives.
+`;
+    // Insert before the final "Instructions:" block
+    const instructionsIdx = prompt.lastIndexOf("Instructions:");
+    if (instructionsIdx !== -1) {
+      prompt = prompt.slice(0, instructionsIdx) + rescheduleBlock + "\n" + prompt.slice(instructionsIdx);
+    } else {
+      prompt += "\n" + rescheduleBlock;
+    }
   }
 
   const { text } = await generateText({

@@ -5,13 +5,10 @@ import type { LooseEnd } from "@/lib/types";
 import ThreatLevel from "./ThreatLevel";
 import AgentInsight from "./AgentInsight";
 import RecentActivity from "./RecentActivity";
-import DigestButton from "./DigestButton";
 export default function Sidebar({
   items,
-  junkCount,
 }: {
   items: LooseEnd[];
-  junkCount: number;
 }) {
   return (
     <motion.aside
@@ -20,8 +17,7 @@ export default function Sidebar({
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.4, ease: [0.25, 1, 0.5, 1] }}
     >
-      <ThreatLevel items={items} junkCount={junkCount} />
-      <DigestButton items={items} junkCount={junkCount} />
+      <ThreatLevel items={items} />
       <RecentActivity />
       <AgentInsight />
     </motion.aside>

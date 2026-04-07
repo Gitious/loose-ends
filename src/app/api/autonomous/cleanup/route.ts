@@ -16,17 +16,24 @@ export async function POST(req: Request) {
 
   // Parse junk email list from request
   let messageIds: string[] = [];
-  let senders: string[] = [];
   try {
     const body = await req.json();
     messageIds = body.messageIds || [];
-    senders = body.senders || [];
   } catch {
     return Response.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  if (messageIds.length === 0) {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
     return Response.json({ error: "No emails to trash" }, { status: 400 });
+  }
+
+  if (messageIds.length > 200) {
+    return Response.json({ error: "Too many messages" }, { status: 400 });
+  }
+
+  // Validate all elements are alphanumeric strings (Gmail message IDs)
+  if (!messageIds.every((id: unknown) => typeof id === "string" && /^[a-zA-Z0-9]+$/.test(id))) {
+    return Response.json({ error: "Invalid messageId format" }, { status: 400 });
   }
 
   // FGA check: does the user allow gmail.can_delete?

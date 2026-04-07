@@ -1,0 +1,265 @@
+LOOSE ENDS — 3-MINUTE DEMO VIDEO SCRIPT
+==========================================
+
+Title card: "Loose Ends — the agent that ties them up"
+
+Total runtime: 3:00
+Voiceover: ~420 words, natural delivery
+
+
+===========================================
+ACT 1 — THE PAIN (0:00–0:12)
+===========================================
+
+VISUAL: Fast cuts on a rising tone.
+  - Gmail inbox scrolling fast (847 unread)
+  - Slack sidebar with red unread badges on 6 channels
+  - GitHub notifications tab: "52 unread"
+  - Calendar view with overlapping blocks
+
+VOICEOVER (0:00–0:08):
+"Every day, you drop threads. An email you meant to reply to.
+A PR that went stale. A Slack DM from Tuesday. Your tools don't
+talk to each other — so the threads just pile up."
+
+VISUAL (0:08–0:12): Hard cut to black.
+  White text types on screen: "Loose Ends."
+
+VOICEOVER:
+"We built an agent that picks them up."
+
+
+===========================================
+ACT 2 — THE REVEAL (0:12–0:22)
+===========================================
+
+VISUAL: Dashboard fades in — prioritized feed of cards
+(not a CRUD table). Urgency tiers color-coded (red/yellow/green).
+Agent Suggestions tray visible at top.
+
+VOICEOVER:
+"Loose Ends connects to Gmail, Calendar, GitHub, and Slack through
+Auth0 Token Vault — so your credentials never touch our servers.
+Then it reads everything together. And decides what to do."
+
+VISUAL: Camera pushes in on one suggestion card.
+  Card reads: "Book meeting with Sarah — you're free at 1pm Thursday"
+
+
+===========================================
+ACT 3 — THE HERO FLOW: BOOK & REPLY (0:22–1:42)
+===========================================
+
+0:22–0:35 | VISUAL: Full screen, actual email from Sarah.
+  "Hey — any chance for coffee Thursday 1pm?
+   Want to talk about the Q2 roadmap."
+
+VOICEOVER:
+"Here's a real email. Someone wants thirty minutes of your Thursday."
+
+---
+
+0:35–0:52 | VISUAL: Split screen — email left, agent reasoning right,
+  typing in real time:
+
+    Reading email from sarah.chen@…
+    Extracting: meeting request, Thursday, 1pm, 30min
+    Checking calendar Thursday 12:30–2:00… you're free.
+    Checking FGA: calendar.can_create ✓  gmail.can_reply ✓
+    Drafting reply in your voice.
+
+VOICEOVER:
+"It reads the email. Checks the calendar. Checks your permissions
+through Auth0 FGA — because not every contact should be
+auto-scheduled. Then it drafts the reply in your voice."
+
+---
+
+0:52–1:10 | ★★★ THE HERO SHOT ★★★
+  (shoot this 10 times, pick the best one)
+
+VISUAL: Physical desk. Laptop + phone both in frame.
+  Phone buzzes. CIBA push appears on phone screen:
+
+    "Loose Ends: Book 'Coffee with Sarah' Thursday 1pm
+     AND send confirmation reply? Approve / Deny"
+
+  Thumb enters frame. Taps Approve. Face ID flash.
+
+VOICEOVER:
+"Loose Ends doesn't just ask your browser. It asks YOU.
+Auth0 CIBA pushes the approval to your phone. Because an agent
+that can send email on your behalf should need more than a cookie."
+
+---
+
+1:10–1:25 | VISUAL: Hold the two-screen shot, no cuts.
+  On laptop, in real time:
+    - Google Calendar opens
+    - "Coffee with Sarah" event materializes Thursday 1pm
+  Window switches to second Gmail account (Sarah's):
+    - New email arrives: "Thursday 1pm works — sending invite"
+
+VOICEOVER:
+"Event created. Reply sent. One approval. Two services.
+Zero context-switching."
+
+---
+
+1:25–1:42 | VISUAL: Agent card updates to green checkmark.
+  Sub-text: "Token Vault + FGA + CIBA — all in one flow."
+
+VOICEOVER:
+"That's Token Vault, FGA, and CIBA — all three Auth0 primitives —
+in one flow. But that was one thread. You have eleven."
+
+
+===========================================
+ACT 4 — AUTO-ACT MODE (1:42–2:22)
+===========================================
+
+1:42–1:50 | VISUAL: Toggle flip: Manual → Auto-act.
+  Agent avatar brightens. Status bar: "Agent is working."
+
+VOICEOVER:
+"Flip the switch. Now the agent initiates."
+
+---
+
+1:50–2:15 | ★ PHONE-FIRST SHOT — SINGLE UNBROKEN TAKE ★
+  Notifications stack 2 seconds apart, thumb taps each:
+
+    • "Reply to Marcus about design review?"    → Approve
+    • "Decline Friday 4pm — conflicts with standup?" → Approve
+    • "Nudge reviewers on PR #284 (stale 6 days)?"   → Approve
+    • "Send Slack DM to Priya: 'responding tomorrow'?" → Approve
+
+VOICEOVER:
+"The agent finds the threads. You approve on your phone.
+One tap each. No laptop open. No tabs. Every action goes through
+CIBA — so nothing happens without you."
+
+---
+
+2:15–2:22 | VISUAL: Cut to laptop. Activity log shows
+  four green checkmarks stacked.
+
+VOICEOVER:
+"Ninety seconds. Four loops closed. That was an hour of work."
+
+
+===========================================
+ACT 5 — CROSS-SERVICE PROOF (2:22–2:45)
+===========================================
+
+2:22–2:32 | VISUAL: GitHub PR on screen, stale 8 days.
+  Agent card pops: "PR #284 stalled. Last reviewer:
+  Priya, offline 3 days. Post comment + nudge backup?"
+
+VOICEOVER:
+"It's not just email. A pull request sat for eight days because
+your reviewer went on leave."
+
+---
+
+2:32–2:45 | VISUAL: Split screen — GitHub comment posting
+  LIVE on the left, Slack DM landing with backup reviewer on
+  the right. Both from a single CIBA approval.
+
+VOICEOVER:
+"The agent posted a summary comment, pinged a backup reviewer
+on Slack, and looped you in. One approval. Two services. Again."
+
+
+===========================================
+ACT 6 — THE VISION (2:45–3:00)
+===========================================
+
+2:45–2:55 | VISUAL: Slow push-in on empty dashboard.
+  Text: "All caught up."
+  Laptop closing at 6 PM, warm light.
+
+VOICEOVER:
+"This is what your Monday looks like when nothing falls through."
+
+---
+
+2:55–3:00 | VISUAL: Black screen, white text:
+
+    Loose Ends. Built on Auth0.
+    Because an agent worth trusting
+    has to be worth trusting.
+
+VOICEOVER (quiet, deliberate):
+"Loose Ends. Built on Auth0. Because an agent worth trusting
+has to be worth trusting."
+
+
+===========================================
+B-ROLL / SHOT LIST
+===========================================
+
+MUST-CAPTURE SCREEN RECORDINGS:
+  1. Fast-scroll Gmail inbox (847 unread visible)
+  2. Slack sidebar with red unread badges
+  3. GitHub notifications page with "52 unread"
+  4. Dashboard load animation — cards cascading in
+  5. Agent reasoning stream typing in real time
+     (record at actual speed, feels alive)
+  6. Calendar event materializing on Thursday 1pm slot
+  7. Sarah's inbox receiving the reply (second Gmail, pre-staged)
+  8. Manual → Auto-act toggle flip with avatar state change
+  9. Activity log with four green checkmarks stacking
+  10. GitHub PR comment posting live
+  11. Slack DM landing live
+
+MUST-CAPTURE PHYSICAL FOOTAGE:
+  1. ★ THE HERO SHOT ★ — desk with laptop + phone both visible,
+     single continuous take, phone buzzes, thumb approves,
+     laptop reflects the result. THIS IS THE MONEY SHOT.
+     Shoot it 10 times. Pick the best one.
+  2. Person at laptop at 11:47 PM rubbing eyes (opening)
+  3. Phone on desk with 4 notifications stacking (auto-act)
+     — single take, no cuts between approvals
+  4. Laptop closing at 6 PM, warm light (closing)
+
+PRE-STAGING NEEDED:
+  - Real email from "Sarah Chen" (teammate willing to lend name)
+  - Second Gmail account to show the reply landing
+  - Staged Slack workspace with real-looking DMs
+  - Real GitHub PR that's genuinely 8 days old
+  - CIBA push notifications pre-configured with clean copy
+
+
+===========================================
+PACING NOTES
+===========================================
+
+- The 0:52–1:10 hero shot is the entire demo. Everything before
+  builds to it, everything after rhymes with it. Shoot it like
+  a film, not a screen recording.
+
+- Cut on the beat. The opening four cuts should land on a rising
+  tone that resolves when "Loose Ends" appears on black.
+
+- The auto-act sequence MUST be a single unbroken take on the
+  phone. No jump cuts. Judges need to feel the rhythm of
+  tap-tap-tap-tap = done.
+
+- Resist the urge to show the settings page, the connected
+  accounts page, or any Auth0 infrastructure UI. The infrastructure
+  should be INVISIBLE in the demo and only named in the voiceover.
+
+- Keep agent reasoning text legible but DON'T pause for it.
+  The agent is confident. It moves fast. That's the personality.
+
+
+===========================================
+THE ONE LINE
+===========================================
+
+    "Loose Ends. The agent that ties them up."
+
+Alt closing (stronger for Auth0 audience):
+
+    "An agent worth trusting has to be worth trusting."

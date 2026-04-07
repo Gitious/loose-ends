@@ -56,15 +56,17 @@ export default function ActionConfirmSheet({
   onConfirm,
   onCancel,
   isPending,
+  initialReply,
 }: {
   item: LooseEnd;
   actionId: string;
   onConfirm: (payload: { body: string }) => void;
   onCancel: () => void;
   isPending: boolean;
+  initialReply?: string | null;
 }) {
   const config = ACTION_CONFIG[actionId] || ACTION_CONFIG.comment;
-  const [body, setBody] = useState(item.aiSuggestion || "");
+  const [body, setBody] = useState(initialReply || item.aiSuggestion || "");
   const [isGenerating, setIsGenerating] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

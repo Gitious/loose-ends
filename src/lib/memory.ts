@@ -13,8 +13,19 @@ import sql, { ensureTables } from "./db";
 export interface Memory {
   id: string;
   content: string;
+  memo: string; // short summary (~15 words) for dashboard preview — auto-generated if not provided
   source: "gmail" | "calendar" | "github" | "slack" | "chat" | "agent";
   createdAt: string; // ISO 8601
+}
+
+/** Input type for appendMemory — memo is auto-generated */
+export type MemoryInput = Omit<Memory, "id" | "createdAt" | "memo">;
+
+/** Generate a short memo from content — max 8 words for dashboard preview. */
+function buildMemo(content: string): string {
+  const words = content.split(/\s+/);
+  if (words.length <= 8) return content;
+  return words.slice(0, 8).join(" ") + "…";
 }
 
 /**
@@ -24,7 +35,7 @@ export async function loadMemories(userId: string): Promise<Memory[]> {
   await ensureTables();
 
   const rows = await sql`
-    SELECT id, content, source, created_at
+    SELECT id, content, memo, source, created_at
     FROM memories
     WHERE user_id = ${userId}
     ORDER BY created_at DESC
@@ -33,6 +44,7 @@ export async function loadMemories(userId: string): Promise<Memory[]> {
   return rows.map((r) => ({
     id: r.id as string,
     content: r.content as string,
+    memo: (r.memo as string) || buildMemo(r.content as string),
     source: r.source as Memory["source"],
     createdAt: new Date(r.created_at as string).toISOString(),
   }));
@@ -44,7 +56,7 @@ export async function loadMemories(userId: string): Promise<Memory[]> {
  */
 export async function appendMemory(
   userId: string,
-  memory: Omit<Memory, "id" | "createdAt">
+  memory: MemoryInput
 ): Promise<Memory> {
   await ensureTables();
 
@@ -52,19 +64,22 @@ export async function appendMemory(
 
   // Deduplicate: skip if a semantically similar memory already exists
   const newNorm = memory.content.trim().toLowerCase();
+  // Pre-compute the new memory's word set once (avoids re-creating per iteration)
+  const newWords = new Set(newNorm.split(/\s+/).filter((w) => w.length > 3));
+  const newFirst50 = newNorm.slice(0, 50);
+
   const isDupe = existing.some((m) => {
     const existNorm = m.content.trim().toLowerCase();
     // Exact match
     if (existNorm === newNorm) return true;
     // High overlap: check if one contains the other or first 50 chars match
     if (existNorm.includes(newNorm) || newNorm.includes(existNorm)) return true;
-    if (newNorm.slice(0, 50) === existNorm.slice(0, 50)) return true;
+    if (newFirst50 === existNorm.slice(0, 50)) return true;
     // Word-level similarity: if 70%+ of words overlap, it's a dupe
-    const newWords = new Set(newNorm.split(/\s+/).filter((w) => w.length > 3));
+    if (newWords.size === 0) return false;
     const existWords = new Set(
       existNorm.split(/\s+/).filter((w) => w.length > 3)
     );
-    if (newWords.size === 0) return false;
     let overlap = 0;
     for (const w of newWords) {
       if (existWords.has(w)) overlap++;
@@ -77,34 +92,47 @@ export async function appendMemory(
     const match =
       existing.find(
         (m) =>
-          m.content.trim().toLowerCase().slice(0, 50) === newNorm.slice(0, 50)
+          m.content.trim().toLowerCase().slice(0, 50) === newFirst50
       ) || existing[0];
     return match;
   }
 
+  // Hard cap: compact first if at limit, reject if still full
+  if (existing.length >= MEMORY_CAP) {
+    await compactIfNeeded(userId, existing.length);
+    const refreshed = await sql`SELECT COUNT(*) as c FROM memories WHERE user_id = ${userId}`;
+    if (Number(refreshed[0].c) >= MEMORY_CAP) {
+      return existing[0]; // Still full after compaction — skip
+    }
+  }
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const memo = buildMemo(memory.content);
 
   await sql`
-    INSERT INTO memories (id, user_id, content, source, created_at)
-    VALUES (${id}, ${userId}, ${memory.content}, ${memory.source}, ${now})
+    INSERT INTO memories (id, user_id, content, memo, source, created_at)
+    VALUES (${id}, ${userId}, ${memory.content}, ${memo}, ${memory.source}, ${now})
   `;
 
   const entry: Memory = {
     id,
     content: memory.content,
+    memo,
     source: memory.source,
     createdAt: now,
   };
 
-  // Compact if we've hit the memory cap (existing + newly inserted)
-  await compactIfNeeded(userId, existing.length + 1);
+  // Compact in the background — don't block the insert return path
+  compactIfNeeded(userId, existing.length + 1).catch((err) =>
+    console.error("[memory] Background compaction error:", err)
+  );
 
   return entry;
 }
 
-const MEMORY_CAP = 50;
-const COMPACT_OLDEST = 20;
+const MEMORY_CAP = 25;
+const COMPACT_OLDEST = 15;
 const COMPACT_TARGET = 5;
 
 /**
@@ -158,31 +186,54 @@ async function compactIfNeeded(
           })
         ),
       }),
-      prompt: `You are consolidating a user's memory entries. These are insights an AI assistant learned about a user over time. Many are redundant or outdated.
+      prompt: `Consolidate these ${oldest.length} memories into at most ${COMPACT_TARGET} entries.
 
-Consolidate these ${oldest.length} memories into at most ${COMPACT_TARGET} concise, high-value insights. Merge duplicates, generalize patterns, drop trivial observations. Each consolidated memory should be one clear sentence.
+RULES:
+- Each memory should be 15-30 words. One clear sentence with enough context to be useful.
+- Focus on patterns, preferences, and behaviors — not one-time events.
+- Merge duplicates, drop trivial observations, keep actionable insights.
+- No paragraphs. One sentence per memory.
 
-Memories to consolidate:
+Good examples:
+- "Responds to Slack DMs within 2 hours but lets email pile up during sprints."
+- "Defers infrastructure decisions (Neon DB) under deadline pressure, revisits post-submission."
+- "Iman sends escalating urgent emails when blocked — always prioritize responding."
+
+Memories:
 ${oldestText}`,
     });
 
-    // Delete the old memories
+    // Archive the old memories before deleting — batch all inserts in parallel
     const oldIds = oldest.map((m) => m.id);
+    await Promise.all(
+      oldest.map((m) =>
+        sql`
+          INSERT INTO archived_memories (id, user_id, content, memo, source, created_at)
+          VALUES (${m.id}, ${userId}, ${m.content}, ${buildMemo(m.content)}, ${m.source}, ${m.createdAt})
+          ON CONFLICT (id) DO NOTHING
+        `
+      )
+    );
+
+    // Delete from active memories
     await sql`
       DELETE FROM memories
       WHERE user_id = ${userId}
         AND id = ANY(${oldIds})
     `;
 
-    // Insert consolidated memories
+    // Insert consolidated memories in parallel
     const now = new Date();
-    for (const c of object.consolidated) {
-      const id = crypto.randomUUID();
-      await sql`
-        INSERT INTO memories (id, user_id, content, source, created_at)
-        VALUES (${id}, ${userId}, ${c.content}, ${c.source}, ${now.toISOString()})
-      `;
-    }
+    await Promise.all(
+      object.consolidated.map((c) => {
+        const id = crypto.randomUUID();
+        const memo = buildMemo(c.content);
+        return sql`
+          INSERT INTO memories (id, user_id, content, memo, source, created_at)
+          VALUES (${id}, ${userId}, ${c.content}, ${memo}, ${c.source}, ${now.toISOString()})
+        `;
+      })
+    );
   } catch (err) {
     console.error("[memory] Compaction failed, skipping:", err);
     // graceful fallback — don't lose data

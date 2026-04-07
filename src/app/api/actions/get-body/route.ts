@@ -11,10 +11,24 @@ export async function POST(req: Request) {
   if (!session) return new Response("Unauthorized", { status: 401 });
 
   const userId = session.user?.sub || session.user?.email || "anonymous";
-  const { item } = (await req.json()) as { item: LooseEnd };
 
-  if (!item) {
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { item } = parsed as { item: LooseEnd };
+
+  if (!item || typeof item !== "object") {
     return Response.json({ error: "Missing item" }, { status: 400 });
+  }
+
+  // Validate item.type against known types
+  const validTypes = ["email", "calendar", "github", "slack"];
+  if (!validTypes.includes(item.type)) {
+    return Response.json({ error: "Invalid item type" }, { status: 400 });
   }
 
   // FGA check: can_read for the relevant service
@@ -46,7 +60,7 @@ export async function POST(req: Request) {
   // --- Email: fetch full body from Gmail API ---
   if (item.type === "email") {
     const messageId = item.meta?.messageId;
-    if (!messageId) {
+    if (!messageId || !/^[a-zA-Z0-9]+$/.test(messageId)) {
       return Response.json({ body: item.description || "No content available.", type: "email" });
     }
 
@@ -92,7 +106,7 @@ export async function POST(req: Request) {
   // --- Slack: fetch recent channel messages ---
   if (item.type === "slack") {
     const channelId = item.meta?.channel;
-    if (!channelId) {
+    if (!channelId || !/^[A-Z0-9]+$/.test(channelId)) {
       return Response.json({ body: item.description || "No content available.", type: "slack" });
     }
 

@@ -52,7 +52,7 @@ function ToolResultCard({ items }: { items: LooseEnd[] }) {
   }
 
   return (
-    <div className="my-2 space-y-1.5">
+    <div className="my-2.5 space-y-2">
       {items.map((item) => (
         <div
           key={item.id}
@@ -65,11 +65,11 @@ function ToolResultCard({ items }: { items: LooseEnd[] }) {
             <span className="truncate text-xs font-medium text-le-text">
               {item.title}
             </span>
-            <span className="ml-auto shrink-0 rounded-full bg-le-surface px-2 py-0.5 text-[10px] text-le-muted">
+            <span className="ml-auto shrink-0 rounded-full bg-le-surface/80 px-2 py-0.5 text-[10px] text-le-muted">
               {item.age}
             </span>
           </div>
-          <p className="mt-1 pl-4 text-xs leading-relaxed text-le-muted">
+          <p className="mt-1 pl-4 text-xs leading-relaxed text-le-muted/80">
             {item.description}
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function ChatPanel({ expanded }: { expanded?: boolean }) {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="max-w-[85%] rounded-2xl rounded-tl-md bg-le-elevated/80 px-4 py-3 text-sm leading-relaxed text-le-text"
+            className="max-w-[85%] rounded-2xl rounded-tl-md bg-le-elevated/80 border border-le-border/10 px-4 py-3 text-sm leading-relaxed text-le-text"
           >
             Hey! I&apos;m your Loose Ends agent. I can scan your Gmail, Calendar, GitHub, and Slack to find things you&apos;ve dropped. Just say the word.
           </motion.div>
@@ -203,7 +203,7 @@ export default function ChatPanel({ expanded }: { expanded?: boolean }) {
                   className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     isUser
                       ? "rounded-tr-md bg-le-accent/10 border border-le-accent/20 text-le-text"
-                      : "rounded-tl-md bg-le-elevated/80 text-le-text"
+                      : "rounded-tl-md bg-le-elevated/80 border border-le-border/10 text-le-text"
                   }`}
                 >
                   {message.parts.map((part, i) => {
@@ -309,8 +309,9 @@ export default function ChatPanel({ expanded }: { expanded?: boolean }) {
                               )
                             ) : isCIBATool ? (
                               /* CIBA pending — phone approval indicator */
-                              <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-40" />
+                              <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-30" />
+                                <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/20" />
                                 <svg viewBox="0 0 16 16" fill="currentColor" className="relative h-3 w-3">
                                   <path fillRule="evenodd" d="M8 1a3.5 3.5 0 00-3.5 3.5V8H4a2 2 0 00-2 2v4a2 2 0 002 2h8a2 2 0 002-2v-4a2 2 0 00-2-2h-.5V4.5A3.5 3.5 0 008 1zm2 7V4.5a2 2 0 10-4 0V8h4z" clipRule="evenodd" />
                                 </svg>

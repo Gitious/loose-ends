@@ -10,7 +10,18 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "gmail", "can_delete");
 
-  const { messageId } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const messageId = (body as Record<string, unknown>)?.messageId;
+
+  if (typeof messageId !== "string" || !messageId || !/^[a-zA-Z0-9]+$/.test(messageId)) {
+    return Response.json({ error: "Missing or invalid messageId" }, { status: 400 });
+  }
 
   if (!allowed) {
     await logAction({
@@ -26,10 +37,6 @@ export async function POST(req: Request) {
       { error: "Action not permitted. Enable Gmail delete in Settings." },
       { status: 403 }
     );
-  }
-
-  if (!messageId) {
-    return Response.json({ error: "Missing messageId" }, { status: 400 });
   }
 
   let token: string;
@@ -68,7 +75,7 @@ export async function POST(req: Request) {
       permitted: true,
       success: false,
     });
-    return Response.json({ error: `Failed to trash email: ${err}` }, { status: 500 });
+    return Response.json({ error: "Failed to trash email" }, { status: 500 });
   }
 
   await logAction({

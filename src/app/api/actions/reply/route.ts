@@ -24,10 +24,29 @@ export async function POST(req: Request) {
     );
   }
 
-  const { threadId, to, subject, body, messageId, sendDirectly } = await req.json();
-  if (!to || !subject || !body) {
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { threadId, to, subject, body, messageId, sendDirectly } = parsed as Record<string, unknown>;
+  if (!to || typeof to !== "string" || !subject || typeof subject !== "string" || !body || typeof body !== "string") {
     return Response.json({ error: "Missing required fields" }, { status: 400 });
   }
+
+  // Basic email format check
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return Response.json({ error: "Invalid email address" }, { status: 400 });
+  }
+
+  if (body.length > 100000 || subject.length > 1000) {
+    return Response.json({ error: "Input too long" }, { status: 400 });
+  }
+
+  const typedMessageId = typeof messageId === "string" ? messageId : undefined;
+  const typedThreadId = typeof threadId === "string" ? threadId : undefined;
 
   let token: string;
   try {
@@ -38,7 +57,7 @@ export async function POST(req: Request) {
       userId,
       action: "email.reply",
       service: "gmail",
-      target: messageId,
+      target: typedMessageId,
       details: "Google not connected",
       permitted: true,
       success: false,
@@ -52,7 +71,7 @@ export async function POST(req: Request) {
   const profile = await userProfile.json();
   const from = profile.emailAddress || session.user.email || "";
 
-  const mimeResult = buildMimeMessage({ to, from, subject, body, inReplyTo: messageId });
+  const mimeResult = buildMimeMessage({ to, from, subject, body, inReplyTo: typedMessageId });
 
   if (sendDirectly) {
     // Send the email directly
@@ -64,7 +83,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         raw: mimeResult.raw,
-        threadId,
+        threadId: typedThreadId,
       }),
     });
 
@@ -74,12 +93,12 @@ export async function POST(req: Request) {
         userId,
         action: "email.send",
         service: "gmail",
-        target: messageId,
+        target: typedMessageId,
         details: `Send failed: ${err.slice(0, 100)}`,
         permitted: true,
         success: false,
       });
-      return Response.json({ error: `Failed to send: ${err}` }, { status: 500 });
+      return Response.json({ error: "Failed to send email" }, { status: 500 });
     }
 
     const sent = await sendRes.json();
@@ -87,7 +106,7 @@ export async function POST(req: Request) {
       userId,
       action: "email.send",
       service: "gmail",
-      target: messageId,
+      target: typedMessageId,
       details: `Email sent to ${to}`,
       permitted: true,
       success: true,
@@ -102,7 +121,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: { raw: mimeResult.raw, threadId },
+        message: { raw: mimeResult.raw, threadId: typedThreadId },
       }),
     });
 
@@ -112,12 +131,12 @@ export async function POST(req: Request) {
         userId,
         action: "email.reply",
         service: "gmail",
-        target: messageId,
+        target: typedMessageId,
         details: `Draft creation failed: ${err.slice(0, 100)}`,
         permitted: true,
         success: false,
       });
-      return Response.json({ error: `Failed to create draft: ${err}` }, { status: 500 });
+      return Response.json({ error: "Failed to create draft" }, { status: 500 });
     }
 
     const draft = await draftRes.json();
@@ -125,7 +144,7 @@ export async function POST(req: Request) {
       userId,
       action: "email.reply",
       service: "gmail",
-      target: messageId,
+      target: typedMessageId,
       details: `Draft created for reply to ${to}`,
       permitted: true,
       success: true,

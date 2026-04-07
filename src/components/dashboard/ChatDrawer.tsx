@@ -55,8 +55,8 @@ export default function ChatDrawer() {
         )}
       </AnimatePresence>
 
-      {/* Floating container — fixed bottom-right */}
-      <div className="fixed bottom-5 right-5 z-50">
+      {/* Floating container — fixed bottom-right, responsive on mobile */}
+      <div className="fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-50 max-w-[calc(100vw-1.5rem)] sm:max-w-none">
         <AnimatePresence mode="wait">
           {state === "collapsed" ? (
             /* ── Collapsed: floating button ── */
@@ -77,9 +77,9 @@ export default function ChatDrawer() {
               <span className="text-sm text-le-muted group-hover:text-le-text transition-colors">
                 Ask the agent...
               </span>
-              <kbd className="hidden sm:inline-flex items-center rounded-md bg-le-void/60 border border-le-border/20 px-1.5 py-0.5 text-[10px] font-mono text-le-muted/50">
-                Esc
-              </kbd>
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-le-muted/30 group-hover:text-le-muted/60 transition-colors">
+                <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+              </svg>
             </motion.button>
           ) : (
             /* ── Open / Expanded panel ── */
@@ -92,6 +92,7 @@ export default function ChatDrawer() {
               style={{
                 width: state === "expanded" ? PANEL_SIZES.expanded.width : PANEL_SIZES.open.width,
                 height: state === "expanded" ? PANEL_SIZES.expanded.height : PANEL_SIZES.open.height,
+                maxWidth: "calc(100vw - 1.5rem)",
               }}
               className="flex flex-col overflow-hidden rounded-2xl border border-le-border/30 bg-le-surface/[0.97] backdrop-blur-xl shadow-2xl shadow-black/30 transition-[width,height] duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
             >

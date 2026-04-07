@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { LooseEnd, JunkEmail } from "@/lib/types";
+import type { LooseEnd, JunkEmail, AgentSuggestion } from "@/lib/types";
 
 /* ── Unified suggestion type ── */
 
@@ -15,6 +15,7 @@ export interface Suggestion {
   tier: "auto" | "confirm" | "ciba";
   priority: number; // higher = more important
   meta?: Record<string, string>;
+  aiAction?: "send_email" | "create_event" | "book_and_reply" | "trash_emails" | "post_comment" | "send_slack" | "dismiss"; // original AI action type
 }
 
 /* ── Service visual config ── */
@@ -31,8 +32,8 @@ const SERVICE_ICON: Record<string, { color: string; bg: string; icon: React.Reac
     icon: <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path fillRule="evenodd" d="M4 1.5a.5.5 0 01.5.5v1h7V2a.5.5 0 011 0v1h.5A2 2 0 0115 5v8a2 2 0 01-2 2H3a2 2 0 01-2-2V5a2 2 0 012-2h.5V2a.5.5 0 01.5-.5zM3 7v6h10V7H3z" clipRule="evenodd" /></svg>,
   },
   github: {
-    color: "text-gray-400",
-    bg: "bg-gray-400/10",
+    color: "text-orange-400",
+    bg: "bg-orange-400/10",
     icon: <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path d="M8 .2A8 8 0 005.47 15.79c.4.07.55-.17.55-.38l-.01-1.49c-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8.01 8.01 0 008 .2z" /></svg>,
   },
   slack: {
@@ -152,24 +153,8 @@ export function deriveSuggestions(
     });
   }
 
-  // 5. Scheduling detected — suggest creating a calendar event (only 1, highest urgency first)
-  const SCHED_RE = /\b(meet|meeting|call|catch up|sync|1[:\-]?on[:\-]?1|coffee|lunch|dinner|schedule|available|availability|let'?s (talk|chat|connect)|(?:at|by|around)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday))\b/i;
-  const schedulingEmail = looseEnds.find(
-    (le) => (le.type === "email" || le.type === "slack") && le.actions?.some((a) => a.id === "create-event") && SCHED_RE.test(le.meta?.subject || le.title || "")
-  );
-  if (schedulingEmail) {
-    const sender = (schedulingEmail.meta?.from || schedulingEmail.source || "").split("<")[0].trim();
-    result.push({
-      id: `schedule-${schedulingEmail.id}`,
-      kind: "schedule_event",
-      title: `Meeting with ${sender}`,
-      description: schedulingEmail.title,
-      service: schedulingEmail.type === "slack" ? "slack" : "gmail",
-      tier: "confirm",
-      priority: 85,
-      meta: { itemId: schedulingEmail.id },
-    });
-  }
+  // 5. Scheduling suggestions are now handled by the AI intelligence layer
+  // (agentSuggestions from the suggest endpoint), not by regex/rule matching.
 
   // Sort by priority descending, hard cap at 4
   result.sort((a, b) => b.priority - a.priority);
@@ -203,12 +188,14 @@ function SuggestionChip({
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval>>(null);
   const isJunk = suggestion.kind === "junk_cleanup";
-  const isAutoActable = isJunk || suggestion.kind === "schedule_event";
+  // Auto-actable: junk cleanup, scheduling, and any AI-generated action (send_email, post_comment, send_slack)
+  const isAiAutoActable = suggestion.aiAction === "send_email" || suggestion.aiAction === "post_comment" || suggestion.aiAction === "send_slack" || suggestion.aiAction === "book_and_reply";
+  const isAutoActable = isJunk || suggestion.kind === "schedule_event" || isAiAutoActable;
 
   // Auto-act countdown — fires once per suggestion kind per session.
   // sessionStorage key prevents re-triggering after cancel, dismiss, or page nav.
   useEffect(() => {
-    if (!isAutoActable || !autoActEnabled) return;
+    if (!isAutoActable || autoActEnabled !== true) return;
     const key = `le-autoact-${suggestion.kind}`;
     if (sessionStorage.getItem(key)) return;
     sessionStorage.setItem(key, "1");
@@ -242,8 +229,10 @@ function SuggestionChip({
     // Don't clear sessionStorage — stays cancelled until next full page load
   }
   const svc = SERVICE_ICON[suggestion.service];
-  const tier = TIER_BADGE[suggestion.tier];
-  const accent = TIER_ACCENT[suggestion.tier];
+  // When auto-act is disabled, downgrade "auto" tier display to neutral "confirm"
+  const displayTier = suggestion.tier === "auto" && autoActEnabled !== true ? "confirm" : suggestion.tier;
+  const tier = TIER_BADGE[displayTier];
+  const accent = TIER_ACCENT[displayTier];
   const kindIcon = KIND_ICON[suggestion.kind];
 
   return (
@@ -253,7 +242,7 @@ function SuggestionChip({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
       transition={{ duration: 0.35, delay: index * 0.06, ease: [0.25, 1, 0.5, 1] }}
-      className={`group relative flex-shrink-0 rounded-xl border border-le-border/20 bg-le-surface/80 backdrop-blur-sm overflow-hidden transition-all hover:border-le-border/40 hover:shadow-lg hover:shadow-black/10 ${
+      className={`group relative flex-shrink-0 rounded-xl border border-le-border/20 bg-le-surface/80 backdrop-blur-sm overflow-hidden transition-all duration-200 hover:border-le-border/40 hover:shadow-lg hover:shadow-black/10 ${
         isJunk && showPreview ? "w-[340px]" : "w-[280px]"
       }`}
     >
@@ -316,7 +305,7 @@ function SuggestionChip({
         {isAutoActable && countdown !== null && countdown > 0 && (
           <div className="mt-2 relative h-1 rounded-full bg-le-border/20 overflow-hidden">
             <motion.div
-              className="absolute inset-y-0 left-0 bg-amber-400/60 rounded-full"
+              className="absolute inset-y-0 left-0 bg-amber-400/60 rounded-full will-change-[width]"
               initial={{ width: "100%" }}
               animate={{ width: "0%" }}
               transition={{ duration: AUTO_CLEAN_DELAY, ease: "linear" }}
@@ -364,7 +353,7 @@ function SuggestionChip({
               {isJunk
                 ? "Clean Up"
                 : suggestion.kind === "schedule_event"
-                  ? "Create Event"
+                  ? "Book & Reply"
                   : suggestion.kind === "stale_review"
                     ? "Open"
                     : suggestion.kind === "meeting_prep"
@@ -406,24 +395,83 @@ export default function SuggestionTray({
   onRescueJunk,
   autoActEnabled,
   eventCreatedIds,
+  onAutoBookAndReply,
+  onAutoAction,
+  agentSuggestions,
 }: {
   looseEnds: LooseEnd[];
   junkEmails: JunkEmail[];
   suggestions: Record<string, string>;
+  agentSuggestions?: AgentSuggestion[];
   onJunkCleanup: () => Promise<void>;
   onItemAction: (actionId: string, item: LooseEnd) => void;
   onOpenItem: (itemId: string) => void;
   onRescueJunk?: (j: JunkEmail) => void;
   autoActEnabled?: boolean;
   eventCreatedIds?: Set<string>;
+  onAutoBookAndReply?: (item: LooseEnd) => Promise<void>;
+  onAutoAction?: (action: "send_email" | "post_comment" | "send_slack", item: LooseEnd, params: Record<string, string>) => Promise<void>;
 }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [cleaningJunk, setCleaningJunk] = useState(false);
 
-  const allSuggestions = useMemo(
-    () => deriveSuggestions(looseEnds, junkEmails, suggestions),
-    [looseEnds, junkEmails, suggestions],
-  );
+  // Use AI-generated suggestions when available, fall back to deterministic rules
+  const allSuggestions = useMemo(() => {
+    if (agentSuggestions && agentSuggestions.length > 0) {
+      // Convert AgentSuggestion to internal Suggestion format
+      const ACTION_TO_KIND: Record<string, Suggestion["kind"]> = {
+        send_email: "urgent_reply",
+        create_event: "schedule_event",
+        book_and_reply: "schedule_event",
+        trash_emails: "junk_cleanup",
+        post_comment: "stale_review",
+        send_slack: "slack_followup",
+        dismiss: "ai_tip",
+      };
+      const ACTION_TO_TIER: Record<string, Suggestion["tier"]> = {
+        send_email: "confirm",
+        create_event: "confirm",
+        book_and_reply: "confirm",
+        trash_emails: "auto",
+        post_comment: "confirm",
+        send_slack: "confirm",
+        dismiss: "auto",
+      };
+      // AI-generated suggestions (exclude trash_emails — handled below deterministically)
+      const aiCards: Suggestion[] = agentSuggestions
+        .filter((as) => as.priority >= 50 && as.action !== "trash_emails")
+        .sort((a, b) => b.priority - a.priority)
+        .slice(0, 3)
+        .map((as) => ({
+          id: as.id,
+          kind: ACTION_TO_KIND[as.action] || "ai_tip" as Suggestion["kind"],
+          title: as.title,
+          description: as.reason,
+          service: as.service,
+          tier: ACTION_TO_TIER[as.action] || "confirm" as Suggestion["tier"],
+          priority: as.priority,
+          meta: { itemId: as.itemId || "", ...as.params },
+          aiAction: as.action,
+        }));
+
+      // Always show junk cleanup if there are junk emails (deterministic, not AI-dependent)
+      if (junkEmails.length >= 2) {
+        aiCards.push({
+          id: "junk-cleanup",
+          kind: "junk_cleanup",
+          title: `Clean up ${junkEmails.length} junk emails`,
+          description: `${junkEmails.slice(0, 2).map((j) => j.from.split("@")[0]).join(", ")}${junkEmails.length > 2 ? ` +${junkEmails.length - 2} more` : ""}`,
+          service: "gmail",
+          tier: "auto",
+          priority: 70,
+          meta: { count: String(junkEmails.length) },
+        });
+      }
+
+      return aiCards;
+    }
+    return deriveSuggestions(looseEnds, junkEmails, suggestions);
+  }, [agentSuggestions, looseEnds, junkEmails, suggestions]);
 
   const visible = useMemo(
     () => allSuggestions.filter((s) => {
@@ -460,9 +508,18 @@ export default function SuggestionTray({
     if (s.meta?.itemId) {
       const item = looseEnds.find((le) => le.id === s.meta?.itemId);
       if (item) {
-        if (s.kind === "schedule_event") {
+        // Auto-act mode: use autonomous CIBA-gated endpoints for all AI actions
+        if (autoActEnabled && s.aiAction && s.aiAction !== "dismiss") {
+          if (s.aiAction === "book_and_reply" || s.aiAction === "create_event") {
+            if (onAutoBookAndReply) onAutoBookAndReply(item);
+          } else if ((s.aiAction === "send_email" || s.aiAction === "post_comment" || s.aiAction === "send_slack") && onAutoAction) {
+            onAutoAction(s.aiAction, item, s.meta || {});
+          }
+        } else if (s.kind === "schedule_event") {
+          // Manual mode: show the combined Book & Reply form
           onItemAction("create-event", item);
         } else if (s.kind === "urgent_reply" || s.kind === "slack_followup") {
+          // Manual mode: open reply composer
           onItemAction("reply", item);
         } else {
           onOpenItem(item.id);
@@ -471,7 +528,7 @@ export default function SuggestionTray({
     }
 
     handleDismiss(s.id);
-  }, [looseEnds, onJunkCleanup, onItemAction, onOpenItem, handleDismiss]);
+  }, [looseEnds, onJunkCleanup, onItemAction, onOpenItem, handleDismiss, autoActEnabled, onAutoBookAndReply, onAutoAction]);
 
   if (visible.length === 0) return null;
 

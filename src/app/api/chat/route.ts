@@ -11,6 +11,7 @@ import { withCIBA } from "@/lib/ciba";
 import { buildMimeMessage } from "@/lib/gmail-mime";
 import { loadMemories, appendMemory, deleteMemory } from "@/lib/memory";
 import { loadPermissions, defaultPermissions, type UserPermissions, type ServiceName } from "@/lib/fga";
+import { loadPlate } from "@/lib/plate";
 import { logAction } from "@/lib/audit";
 
 export const maxDuration = 300; // 5 min — allows time for CIBA push approval
@@ -1077,7 +1078,7 @@ export async function POST(req: Request) {
   // ---------------------------------------------------------------------------
   const saveMemory = tool({
     description:
-      "Save a learned insight about the user based on patterns observed across their data. Call when you notice recurring patterns, preferences, or habits.",
+      "Save a behavioral pattern about the user as one clear sentence (15-30 words). Focus on recurring habits, preferences, or how they work — not one-time events. Example: 'Responds to Slack DMs within 2 hours but lets email pile up during sprints.'",
     inputSchema: z.object({
       content: z.string().describe("The insight or pattern observed"),
       source: z
@@ -1254,15 +1255,26 @@ export async function POST(req: Request) {
     },
   });
 
-  // Load memories and permissions in parallel
+  // Load memories, permissions, and plate context in parallel
   let memoriesBlock = "";
   let permissionsBlock = "";
+  let plateBlock = "";
   let userPermissions: UserPermissions | null = null;
 
-  const [memoriesResult, permissionsResult] = await Promise.allSettled([
+  const [memoriesResult, permissionsResult, plateResult] = await Promise.allSettled([
     loadMemories(userId),
     loadPermissions(userId),
+    loadPlate(userId),
   ]);
+
+  // Inject plate context
+  if (plateResult.status === "fulfilled" && plateResult.value) {
+    const plate = plateResult.value;
+    const topItemLines = plate.topItems.map(
+      (item) => `- [${item.urgency}] ${item.title} (${item.type}, ${item.age})`
+    ).join("\n");
+    plateBlock = `\n\nUSER'S CURRENT PLATE:\n${plate.summary}${topItemLines ? `\nTop items:\n${topItemLines}` : ""}\nUse this context to prioritize. Don't rescan if the plate is fresh.`;
+  }
 
   if (memoriesResult.status === "fulfilled" && memoriesResult.value.length > 0) {
     const lines = memoriesResult.value.map(
@@ -1356,7 +1368,7 @@ Other: suggestAction
 CRITICAL RULES:
 1. BE CONCISE. Short responses. No over-explaining.
 2. JUNK/SPAM CLEANUP: Use bulkTrashJunk (NOT trashEmail) for multiple emails. If previous scan results are still in the conversation, use those messageIds directly — do NOT rescan.
-3. Tier 3 tools (send, trash, approve, post) require Auth0 Guardian approval on the user's phone. When you call one, tell the user: "Check your phone to approve this action." The tool blocks until they approve. NEVER say an action was completed unless the tool returned { success: true }.
+3. Tier 3 tools (send, trash, approve, post) require Auth0 Guardian approval. BEFORE calling the tool, output a text message like "Sending approval to your phone..." FIRST, THEN call the tool in the same response. The tool blocks until they approve. After it returns, report the result. NEVER say an action was completed unless the tool returned { success: true }.
 4. If a tool returns { denied: true } or { error: "...Guardian..." }, tell the user the action was BLOCKED and they need to approve on their phone or check Settings.
 5. NEVER hallucinate success. If the tool returned an error, say it failed. Do not say "deleted" or "sent" unless the tool explicitly confirmed success.
 6. Before replying to emails: call getEmailDetails to get headers and body.
@@ -1376,9 +1388,15 @@ MEMORY BEHAVIOR:
 - Use forgetMemory to clean up outdated or incorrect memories (recall first to get the ID).
 - Call getUserContext when you need situational awareness (current date/time, connected services, memory stats).
 
+CONTEXT AWARENESS:
+- Use scan results from this conversation as your understanding of the user's current plate (what needs replies, reviews, upcoming meetings).
+- Call getUserContext when you need the current date/time, connected services, or memory stats.
+- When the user's plate is heavy (many urgent items), prioritize and triage rather than addressing everything.
+- Reference specific items by name when suggesting actions — don't be vague.
+
 FGA (Fine-Grained Authorization): If a tool is not available to you, it means the user disabled that permission. Tell them to enable it in Settings > Agent Permissions.
 
-If a tool returns an error about reconnecting, tell the user to go to Settings.${memoriesBlock}${permissionsBlock}`,
+If a tool returns an error about reconnecting, tell the user to go to Settings.${plateBlock}${memoriesBlock}${permissionsBlock}`,
       messages: modelMessages,
       tools,
       stopWhen: stepCountIs(10),

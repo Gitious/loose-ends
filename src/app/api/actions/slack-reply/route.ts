@@ -10,14 +10,22 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "slack", "can_send");
 
-  const { channel, text, threadTs } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { channel, text, threadTs } = body as Record<string, unknown>;
+  const typedChannel = typeof channel === "string" ? channel : undefined;
 
   if (!allowed) {
     await logAction({
       userId,
       action: "slack.send",
       service: "slack",
-      target: channel,
+      target: typedChannel,
       details: "Permission denied for Slack send",
       permitted: false,
       success: false,
@@ -28,8 +36,16 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!channel || !text) {
+  if (!channel || typeof channel !== "string" || !text || typeof text !== "string") {
     return Response.json({ error: "Missing required fields" }, { status: 400 });
+  }
+
+  if (channel.length > 100 || text.length > 40000) {
+    return Response.json({ error: "Input too long" }, { status: 400 });
+  }
+
+  if (threadTs !== undefined && (typeof threadTs !== "string" || threadTs.length > 50)) {
+    return Response.json({ error: "Invalid threadTs" }, { status: 400 });
   }
 
   let token: string;
@@ -41,7 +57,7 @@ export async function POST(req: Request) {
       userId,
       action: "slack.send",
       service: "slack",
-      target: channel,
+      target: typedChannel,
       details: "Slack not connected",
       permitted: true,
       success: false,
@@ -51,11 +67,11 @@ export async function POST(req: Request) {
 
   // Post message via Slack chat.postMessage API
   const slackBody: Record<string, string> = {
-    channel,
-    text,
+    channel: channel as string,
+    text: text as string,
   };
   if (threadTs) {
-    slackBody.thread_ts = threadTs;
+    slackBody.thread_ts = threadTs as string;
   }
 
   const slackRes = await fetch("https://slack.com/api/chat.postMessage", {
@@ -73,12 +89,12 @@ export async function POST(req: Request) {
       userId,
       action: "slack.send",
       service: "slack",
-      target: channel,
+      target: typedChannel,
       details: `Slack API error: ${err.slice(0, 100)}`,
       permitted: true,
       success: false,
     });
-    return Response.json({ error: `Slack API error: ${err}` }, { status: 500 });
+    return Response.json({ error: "Slack API error" }, { status: 500 });
   }
 
   const slackData = await slackRes.json();
@@ -87,13 +103,13 @@ export async function POST(req: Request) {
       userId,
       action: "slack.send",
       service: "slack",
-      target: channel,
+      target: typedChannel,
       details: `Slack error: ${slackData.error || "unknown"}`,
       permitted: true,
       success: false,
     });
     return Response.json(
-      { error: `Slack error: ${slackData.error || "unknown"}` },
+      { error: "Slack error" },
       { status: 500 }
     );
   }
@@ -102,7 +118,7 @@ export async function POST(req: Request) {
     userId,
     action: "slack.send",
     service: "slack",
-    target: channel,
+    target: typedChannel,
     details: "Message sent to Slack",
     permitted: true,
     success: true,

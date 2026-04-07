@@ -1,4 +1,5 @@
 import { auth0 } from "@/lib/auth0";
+import { checkPermission } from "@/lib/fga";
 import { generateDigestContent, buildDigestEmail, sendDigestEmail } from "@/lib/digest";
 import { logAction } from "@/lib/audit";
 import type { LooseEnd } from "@/lib/types";
@@ -18,6 +19,16 @@ export async function POST(req: Request) {
   if (!session) return new Response("Unauthorized", { status: 401 });
 
   const userId = session.user?.sub || session.user?.email || "anonymous";
+
+  // FGA check: require gmail.can_read to send a digest (it reads email data)
+  const allowed = await checkPermission(userId, "gmail", "can_read");
+  if (!allowed) {
+    return Response.json(
+      { error: "Permission denied. Enable Gmail Read in Settings to send digest." },
+      { status: 403 }
+    );
+  }
+
   const userName =
     (typeof session.user?.name === "string" ? session.user.name.split(" ")[0] : null) ||
     session.user?.nickname ||
@@ -32,6 +43,14 @@ export async function POST(req: Request) {
     junkCount = body.junkCount ?? 0;
   } catch {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  if (!Array.isArray(looseEnds) || looseEnds.length > 200) {
+    return Response.json({ error: "Invalid loose ends data" }, { status: 400 });
+  }
+
+  if (typeof junkCount !== "number" || junkCount < 0) {
+    junkCount = 0;
   }
 
   if (looseEnds.length === 0) {

@@ -1,0 +1,135 @@
+WHERE TO POST — LAUNCH STRATEGY
+================================
+
+
+DAY 1 (launch day) — hit these hard
+------------------------------------
+
+1. X / TWITTER THREAD ★ MOST IMPORTANT
+   - Post the 15-second hero clip (phone+laptop CIBA moment) as
+     the OPENING tweet, not a reply
+   - Thread 8-12 tweets telling the story:
+     • Tweet 1: hero clip + one sentence ("I built an agent...")
+     • Tweet 2: the problem (dropped threads)
+     • Tweet 3: why AI alone wasn't enough
+     • Tweets 4-6: Token Vault / FGA / CIBA explained
+     • Tweet 7: the hero flow in detail
+     • Tweet 8: auto-act mode
+     • Tweet 9: cross-service proof
+     • Tweet 10: what's next + link to blog + link to demo
+   - Use hashtags sparingly: #Auth0 #AIAgents
+   - Tag @auth0 and anyone at Auth0 you know
+   - Post at 9-11am PT on Tuesday or Wednesday (best engagement)
+   - Be present in replies for 2-3 hours after posting
+
+2. LINKEDIN
+   - Post the FULL 3-min demo video directly (LinkedIn's algo
+     loves native video, not YouTube links)
+   - Lead with the story: "11:47 PM. 847 unread emails. I
+     built an agent to fix this."
+   - Same points as Twitter, but longer paragraphs, no hashtag spam
+   - Tag Auth0 company page
+   - Post during weekday business hours (9am-12pm)
+
+3. DEV.TO
+   - Paste the full blog post
+   - Tag: #auth0 #ai #nextjs #agents
+   - Auth0 has a presence on Dev.to and actively engages
+   - This gets the post onto their radar
+
+
+DAY 2-3 — broaden reach
+-----------------------
+
+4. HACKER NEWS
+   - Title: "Show HN: Loose Ends — an AI agent that acts across
+     Gmail, Calendar, GitHub & Slack with Auth0 CIBA approval"
+   - Post Tuesday-Thursday 8-10am PT
+   - Include: live demo URL, source link, one-paragraph summary
+   - Be present in comments for 4+ hours after posting
+   - Be humble and specific when answering technical questions
+
+5. HASHNODE / MEDIUM
+   - Syndicate the blog post
+   - Set canonical URL to Dev.to (avoid SEO split)
+   - Post in relevant publications ("Better Programming", "AWS in
+     Plain English", etc.) if they accept
+
+6. AUTH0 COMMUNITY FORUM
+   - Post in the Showcase section
+   - This is your TIGHTEST-FIT audience — Auth0 developers who
+     will appreciate Token Vault + FGA + CIBA working together
+   - Include architecture diagram if possible
+
+7. REDDIT (different angles for each sub)
+   - r/SideProject: lead with the story, the journey
+   - r/nextjs: lead with the tech stack and architecture
+   - r/webdev: lead with the UX and problem
+   - r/artificial: lead with the agent design patterns
+
+
+OPTIONAL DISCOVERY PLAYS
+-------------------------
+
+8. PRODUCT HUNT
+   - Only if you have a polished landing page
+   - Post on a Tuesday (highest traffic day)
+   - Need a hunter with followers for the launch
+   - Don't post unless you're committed to answering comments
+     all day
+
+9. INDIE HACKERS
+   - Shorter version of the blog
+   - Frame: "what I learned building an AI agent with real auth"
+   - Community cares about the journey, not just the product
+
+10. YOUTUBE
+    - Upload the 3-min demo
+    - Title: "Building an AI Agent with Auth0 CIBA — Live Demo"
+    - Include timestamps in description
+    - Embed in blog post
+
+
+CONTENT VARIATIONS TO HAVE READY
+---------------------------------
+
+- 30-second clip: just the hero CIBA shot (for TikTok/Shorts/Reels)
+- 60-second clip: pain + hero flow only (Twitter native)
+- 3-minute clip: full demo (LinkedIn + YouTube)
+- Screenshots: dashboard, suggestion tray, CIBA phone push,
+  permissions page
+- Architecture diagram: showing Token Vault + FGA + CIBA flow
+
+
+TIMING NOTES
+-------------
+
+- Don't post everywhere at once. Spread over 3-4 days.
+- Monitor engagement on first post, adjust messaging for later ones.
+- Save the Hacker News post for when you have a bit of
+  momentum (couple hundred likes from Twitter first).
+- DO NOT post in multiple subreddits the same day — looks spammy.
+
+
+TRACKING
+--------
+
+Set up:
+- UTM parameters on all posted links
+- Simple analytics (Plausible, Fathom, or Vercel Analytics)
+- Track: blog reads, demo video plays, signups, GitHub stars
+
+
+THE FIRST 24 HOURS MATTER MOST
+-------------------------------
+
+If the Twitter thread doesn't hit within 2 hours, the algorithm
+won't save you. Do these to boost the opener:
+
+  - Have 3-4 friends ready to like/reply in the first 30 minutes
+  - Reply to your own thread to add context (keeps it alive)
+  - Quote-tweet yourself from a different angle 4 hours later
+  - DM the link directly to people who might care
+  - Pin the thread to your profile
+
+Good luck.

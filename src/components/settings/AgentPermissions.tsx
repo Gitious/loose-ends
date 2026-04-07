@@ -46,18 +46,25 @@ interface PermissionToggle {
   label: string;
 }
 
+/** Each column slot is either a toggle or null (empty placeholder). */
+type ColumnSlot = PermissionToggle | null;
+
+/** Generic column headers shown above the toggles. */
+const columnHeaders = ["Read", "Write", "Delete"];
+
 interface ServiceRow {
   id: ServiceName;
   name: string;
   icon: React.ReactNode;
-  toggles: PermissionToggle[];
+  /** Exactly 3 entries — one per column. Use null for empty slots. */
+  columns: [ColumnSlot, ColumnSlot, ColumnSlot];
 }
 
 const services: ServiceRow[] = [
   {
     id: "gmail",
     name: "Gmail",
-    toggles: [
+    columns: [
       { key: "can_read", label: "Read" },
       { key: "can_reply", label: "Reply" },
       { key: "can_delete", label: "Delete" },
@@ -74,7 +81,7 @@ const services: ServiceRow[] = [
   {
     id: "calendar",
     name: "Calendar",
-    toggles: [
+    columns: [
       { key: "can_read", label: "Read" },
       { key: "can_create", label: "Create" },
       { key: "can_delete", label: "Delete" },
@@ -88,7 +95,7 @@ const services: ServiceRow[] = [
   {
     id: "github",
     name: "GitHub",
-    toggles: [
+    columns: [
       { key: "can_read", label: "Read" },
       { key: "can_comment", label: "Comment" },
       { key: "can_approve", label: "Approve" },
@@ -102,9 +109,10 @@ const services: ServiceRow[] = [
   {
     id: "slack",
     name: "Slack",
-    toggles: [
+    columns: [
       { key: "can_read", label: "Read" },
       { key: "can_send", label: "Send" },
+      null,
     ],
     icon: (
       <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none">
@@ -248,53 +256,67 @@ export default function AgentPermissions() {
           ))}
         </div>
       ) : (
-        <div className="divide-y divide-le-border/30">
+        <div className="rounded-xl border border-le-border/15 bg-le-void/40 overflow-hidden">
+          {/* Column headers */}
+          <div className="flex items-center gap-4 px-4 py-2 border-b border-le-border/10">
+            <div className="h-8 w-8 shrink-0" />
+            <span className="text-sm w-20 shrink-0" />
+            <div className="flex items-center gap-4 ml-auto">
+              {columnHeaders.map((header) => (
+                <div key={header} className="w-[5.5rem] text-center">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-le-muted/40">{header}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Service rows */}
+          <div className="divide-y divide-le-border/10">
           {services.map((svc, i) => {
             const svcPerms = permissions[svc.id] as unknown as Record<string, boolean>;
 
             return (
               <motion.div
                 key={svc.id}
-                className="flex items-center gap-4 py-4 first:pt-0 last:pb-0"
+                className="flex items-center gap-4 px-4 py-3.5"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: 0.12 + i * 0.04, duration: 0.2 }}
+                transition={{ delay: 0.08 + i * 0.04, duration: 0.2 }}
               >
-                {/* Service icon + name */}
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-le-elevated">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-le-elevated">
                   {svc.icon}
                 </div>
-                <span className="text-sm font-medium text-le-text w-20">{svc.name}</span>
+                <span className="text-sm font-medium text-le-text w-20 shrink-0">{svc.name}</span>
 
-                {/* Toggles row */}
-                <div className="ml-auto flex items-center gap-5">
-                  {svc.toggles.map((toggle) => {
-                    const isOn = svcPerms[toggle.key] ?? true;
-                    return (
-                      <div key={toggle.key} className="flex items-center gap-2">
+                <div className="flex items-center gap-4 ml-auto">
+                  {svc.columns.map((col, colIdx) =>
+                    col ? (
+                      <div key={col.key} className="flex items-center gap-1.5 w-[5.5rem]">
                         <Toggle
-                          checked={isOn}
-                          onChange={(v) => handleToggle(svc.id, toggle.key, v)}
-                          label={`${svc.name} ${toggle.label}`}
+                          checked={svcPerms[col.key] ?? true}
+                          onChange={(v) => handleToggle(svc.id, col.key, v)}
+                          label={`${svc.name} ${col.label}`}
                         />
-                        <span className={`text-xs w-14 ${isOn ? "text-le-text" : "text-le-muted/50"}`}>
-                          {toggle.label}
+                        <span className={`text-[11px] ${(svcPerms[col.key] ?? true) ? "text-le-text/70" : "text-le-muted/30"}`}>
+                          {col.label}
                         </span>
                       </div>
-                    );
-                  })}
+                    ) : (
+                      <div key={`empty-${colIdx}`} className="w-[5.5rem]" />
+                    )
+                  )}
                 </div>
               </motion.div>
             );
           })}
+          </div>
         </div>
       )}
 
       {/* Agent Autonomy — separate from capability permissions */}
-      <div className="mt-6 pt-5 border-t border-le-border/20">
+      <div className="mt-6 pt-6 border-t border-le-border/20">
         <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400">
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4.5 w-4.5">
               <path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd" />
             </svg>
           </div>
@@ -304,7 +326,7 @@ export default function AgentPermissions() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-xl bg-le-void/40 border border-le-border/15 px-4 py-3">
+        <div className="flex items-center justify-between rounded-xl bg-amber-500/[0.03] border border-amber-500/10 px-4 py-3.5">
           <div className="flex items-center gap-3">
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-le-elevated">
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-le-muted">

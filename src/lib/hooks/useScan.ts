@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { LooseEnd, JunkEmail } from "@/lib/types";
+import type { LooseEnd, JunkEmail, AgentSuggestion } from "@/lib/types";
 
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const VISIBILITY_THROTTLE = 2 * 60 * 1000; // 2 minutes
@@ -21,11 +21,17 @@ interface ScanResult {
   clearJunk: () => void;
   rescueJunkEmail: (junkEmail: JunkEmail) => void;
   autonomousStatus: "idle" | "pending" | "done";
+  agentSuggestions: AgentSuggestion[];
+  textSuggestions: Record<string, string>;
+  suggestionsLoading: boolean;
 }
 
 export function useScan(): ScanResult {
   const [looseEnds, setLooseEnds] = useState<LooseEnd[]>([]);
   const [junkEmails, setJunkEmails] = useState<JunkEmail[]>([]);
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
+  const [textSuggestions, setTextSuggestions] = useState<Record<string, string>>({});
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [services, setServices] = useState<Record<string, boolean>>({});
@@ -88,6 +94,32 @@ export function useScan(): ScanResult {
       // Cache results so navigation doesn't trigger rescan
       sessionStorage.setItem("le-last-scan", String(Date.now()));
       if (!only) { try { sessionStorage.setItem("le-scan-results", JSON.stringify(data)); } catch {} }
+
+      // Fetch AI suggestions after scan completes
+      const allItems = only ? [...(data.looseEnds || [])] : (data.looseEnds || []);
+      const allJunk = data.junkEmails || [];
+      console.log("[useScan] Scan done, fetching suggestions for", allItems.length, "items,", allJunk.length, "junk");
+      if (allItems.length > 0 || allJunk.length > 0) {
+        setSuggestionsLoading(true);
+        fetch("/api/scan/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ looseEnds: allItems, junkEmails: allJunk }),
+        })
+          .then((r) => {
+            console.log("[useScan] Suggest response:", r.status);
+            return r.ok ? r.json() : null;
+          })
+          .then((suggestData) => {
+            console.log("[useScan] Suggest data:", suggestData ? "received" : "null", Array.isArray(suggestData?.suggestions) ? suggestData.suggestions.length + " suggestions" : "");
+            if (suggestData && Array.isArray(suggestData.suggestions)) {
+              setAgentSuggestions(suggestData.suggestions);
+              setTextSuggestions(suggestData.textSuggestions || {});
+            }
+          })
+          .catch((err) => console.error("[useScan] Suggest fetch error:", err))
+          .finally(() => setSuggestionsLoading(false));
+      }
     } catch (err) {
       setErrors({ scan: String(err) });
     } finally {
@@ -199,5 +231,5 @@ export function useScan(): ScanResult {
     setLooseEnds((prev) => [...prev, rescued]);
   }, []);
 
-  return { looseEnds, junkEmails, isScanning, errors, services, servicesLoaded, denied, scan, lastScannedAt, removeItem, dismissItem, clearJunk, rescueJunkEmail, autonomousStatus };
+  return { looseEnds, junkEmails, isScanning, errors, services, servicesLoaded, denied, scan, lastScannedAt, removeItem, dismissItem, clearJunk, rescueJunkEmail, autonomousStatus, agentSuggestions, textSuggestions, suggestionsLoading };
 }

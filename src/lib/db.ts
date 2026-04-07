@@ -37,6 +37,9 @@ export async function ensureTables() {
     )
   `;
 
+  // Add memo column for memory summaries (for existing deployments)
+  await sql`ALTER TABLE memories ADD COLUMN IF NOT EXISTS memo TEXT`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS permissions (
       user_id TEXT PRIMARY KEY,
@@ -69,6 +72,27 @@ export async function ensureTables() {
       title TEXT,
       sender TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS archived_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      memo TEXT,
+      source TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_archived_mem_user ON archived_memories(user_id)`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS plate (
+      user_id TEXT PRIMARY KEY,
+      data JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
 

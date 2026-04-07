@@ -33,11 +33,14 @@ export default function FilterTabs({
             onClick={() => onChange(tab.key)}
             className={`relative flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-150 ${
               isActive
-                ? "bg-le-elevated text-le-text shadow-sm"
-                : "text-le-muted hover:text-le-text"
+                ? "bg-le-elevated text-le-text shadow-sm shadow-black/20"
+                : "text-le-muted hover:text-le-text hover:bg-le-elevated/40"
             }`}
           >
             {tab.label}
+            {isActive && (
+              <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-le-accent/70" />
+            )}
             {count > 0 && (
               <span
                 className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-medium ${

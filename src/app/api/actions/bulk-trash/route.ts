@@ -10,7 +10,14 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "gmail", "can_delete");
 
-  const { messageIds } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { messageIds } = body as Record<string, unknown>;
   const target = `${Array.isArray(messageIds) ? messageIds.length : 0} emails`;
 
   if (!allowed) {
@@ -35,6 +42,11 @@ export async function POST(req: Request) {
 
   if (messageIds.length > 100) {
     return Response.json({ error: "Too many messages. Maximum 100 per request." }, { status: 400 });
+  }
+
+  // Validate all elements are alphanumeric strings (Gmail message IDs)
+  if (!messageIds.every((id: unknown) => typeof id === "string" && /^[a-zA-Z0-9]+$/.test(id))) {
+    return Response.json({ error: "Invalid messageId format" }, { status: 400 });
   }
 
   let token: string;
@@ -80,7 +92,7 @@ export async function POST(req: Request) {
       permitted: true,
       success: false,
     });
-    return Response.json({ error: `Failed to bulk trash emails: ${err}` }, { status: 500 });
+    return Response.json({ error: "Failed to bulk trash emails" }, { status: 500 });
   }
 
   await logAction({

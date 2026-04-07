@@ -1,0 +1,187 @@
+I built an AI agent that handles my inbox.
+The hard part wasn't the AI.
+==========================================
+
+Subtitle: Why Auth0's Token Vault, FGA, and CIBA are the missing
+pieces for trustworthy agents.
+
+
+It's 11:47 PM on a Tuesday. I have 847 unread emails. A PR has
+been stalled for eight days. Someone DM'd me on Slack three hours
+ago and I forgot to reply. A calendar conflict is about to explode
+into an awkward Slack message tomorrow morning.
+
+This is the problem. Not "too much email." Not "too many tools."
+It's that the threads drop, and nobody picks them up.
+
+I spent the last week building an AI agent that does. It's called
+Loose Ends. It scans Gmail, Calendar, GitHub, and Slack, finds
+the things you forgot about, and — with your permission — handles
+them.
+
+
+THE AI PART WAS EASY. THE TRUST PART WASN'T.
+---------------------------------------------
+
+Getting an LLM to read emails and decide what to do is a weekend
+project in 2026. Claude Haiku can parse a scheduling request and
+draft a reply in under two seconds. That's not novel.
+
+The hard question is: how do you let an agent act on your behalf
+across four different services — sending emails, creating calendar
+events, posting GitHub comments, messaging on Slack — without
+losing control?
+
+This is where it stops being an AI project and starts being an
+identity project. And why I built Loose Ends on Auth0.
+
+
+THREE AUTH0 PRIMITIVES, ONE TRUST STORY
+----------------------------------------
+
+1. TOKEN VAULT
+
+Every service integration (Gmail, Calendar, GitHub, Slack) connects
+through Auth0's Token Vault. My server never touches your OAuth
+tokens. When the agent needs to send an email, it asks Auth0 for
+a scoped Gmail token that exists for the duration of that one
+API call. If I get breached, your inbox doesn't.
+
+2. FGA (FINE-GRAINED AUTHORIZATION)
+
+Not every permission is created equal. Reading Gmail is different
+from sending an email. Adding a calendar event is different from
+deleting one. I modeled seven relations across four services:
+
+  - gmail.can_read, gmail.can_reply, gmail.can_delete
+  - calendar.can_create, calendar.can_delete
+  - github.can_comment, github.can_approve
+  - slack.can_send
+
+Every action passes through a live FGA check before the agent can
+even attempt it. Users decide exactly what the agent is allowed
+to do — per service, per action — and can revoke any of them in
+real time.
+
+3. CIBA (GUARDIAN PUSH APPROVAL)
+
+This is the magic. When the agent wants to do something
+consequential — send an email, create a meeting, post a comment —
+it doesn't just trust a browser session. It fires a push to your
+phone with a plain-English description of the exact action:
+
+    "Book 'Coffee with Sarah' Thursday 1pm AND send confirmation reply?"
+
+You tap Approve on your phone. Face ID confirms it's you. Then
+and only then does the agent act.
+
+The combination matters. Token Vault limits what's exposed. FGA
+limits what's allowed. CIBA confirms what's intended. Remove any
+one of them and the whole story falls apart.
+
+
+THE HERO FLOW: "BOOK & REPLY"
+------------------------------
+
+The demo I care most about is this:
+
+You get an email: "Hey, can we grab coffee Thursday at 1pm to talk
+Q2 roadmap?"
+
+The old way: context-switch to calendar, check if you're free,
+context-switch back, type a reply, hope you didn't double-book.
+
+The new way:
+
+  1. The agent reads the email, extracts:
+     "Thursday 1pm, 30 min, coffee with Sarah, topic: Q2 roadmap"
+  2. It queries your Google Calendar through a Token Vault-scoped
+     token — you're free
+  3. It checks FGA — do you allow the agent to book meetings? yes
+  4. It drafts a reply in your voice
+  5. CIBA push on your phone:
+     "Book meeting + send reply?"
+  6. You tap approve. Face ID. Done.
+  7. The event appears on your calendar. The reply lands in Sarah's
+     inbox. In the time it took you to walk from the coffee machine
+     to your desk.
+
+Two services. Three Auth0 primitives. One approval. That's the
+flow I built the whole app around.
+
+
+AUTO-ACT: THE AGENT INITIATES
+------------------------------
+
+The previous flow is the agent waiting for you to click. The next
+level is the agent initiating.
+
+Flip a toggle. Now when your scan finds a dropped thread, the
+agent doesn't wait. It sends a CIBA push directly:
+
+  - "Reply to Marcus about design review?"              → Tap
+  - "Decline Friday 4pm — conflicts with standup?"      → Tap
+  - "Post comment on PR #284 nudging reviewers?"        → Tap
+  - "Send Slack DM to Priya: 'responding tomorrow'?"    → Tap
+
+Four dropped threads closed in 90 seconds. From your phone. Without
+opening your laptop.
+
+And because every action flows through CIBA, nothing happens
+without you. The agent can suggest, initiate, and draft — but it
+never executes without your fingerprint.
+
+
+WHAT I LEARNED BUILDING THIS
+-----------------------------
+
+1. "AI agent" is the easy part.
+   GPT-4, Claude, whatever — they're all good enough to draft
+   emails and reason about calendars. The differentiation isn't
+   the model. It's what the model is allowed to touch and what
+   happens when it tries.
+
+2. Trust is a product, not a feature.
+   Every surface of the app — the permission toggles, the CIBA
+   binding messages, the audit log, the "what will the agent do
+   and why" reasoning stream — is part of how users decide whether
+   to trust the agent. Auth0 gave me the primitives to make
+   trust visible.
+
+3. The right abstraction for an LLM is "suggest structured
+   actions."
+   My early prototype let the agent generate raw API calls. It
+   was a disaster. The version that worked: the AI generates
+   structured suggestions:
+
+       {
+         action: "send_email",
+         params: { to, subject, body_hint },
+         reason: "..."
+       }
+
+   And my code knows how to execute each action type through the
+   right FGA-gated, CIBA-protected endpoint.
+
+
+WHAT'S NEXT
+-----------
+
+I want the agent to initiate conversations, not just respond:
+
+  - "Your PM hasn't updated the Q2 doc in a week — nudge them?"
+  - "You have three back-to-back meetings Thursday — want me to
+    propose a rescheduled standup?"
+
+That's where this is going: an agent that doesn't just react to
+your loose ends, but actively maintains the relationships and
+commitments you care about.
+
+And none of it works without an identity layer you can actually
+trust.
+
+---
+
+Loose Ends is built for the Auth0 hackathon.
+Full source at github.com/[yourrepo]. Try it at [yourdomain].
+I'd love your feedback.

@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { LooseEnd } from "@/lib/types";
+import type { LooseEnd, ScheduleCheckResult, ProposedEvent, FreeSlot } from "@/lib/types";
 import Badge from "@/components/ui/Badge";
 import ActionConfirmSheet from "./ActionConfirmSheet";
+import ScheduleSheet from "./ScheduleSheet";
+import EventReplySheet from "./EventReplySheet";
 
 const typeIcons: Record<
   LooseEnd["type"],
@@ -79,6 +81,16 @@ export default function LooseEndCard({
   confirmAction,
   onConfirm,
   onCancelConfirm,
+  scheduleCheck,
+  onScheduleCreate,
+  onScheduleSlot,
+  onScheduleReply,
+  onScheduleCancel,
+  cibaWaiting,
+  preGeneratedReply,
+  eventReplySheet,
+  onEventReplyConfirm,
+  onEventReplyCancel,
 }: {
   item: LooseEnd;
   index: number;
@@ -91,6 +103,16 @@ export default function LooseEndCard({
   confirmAction?: { item: LooseEnd; actionId: string } | null;
   onConfirm?: (payload: { body: string }) => void;
   onCancelConfirm?: () => void;
+  scheduleCheck?: { item: LooseEnd; result: ScheduleCheckResult } | null;
+  onScheduleCreate?: (proposed: ProposedEvent) => void;
+  onScheduleSlot?: (slot: FreeSlot) => void;
+  onScheduleReply?: (freeSlots: FreeSlot[]) => void;
+  onScheduleCancel?: () => void;
+  cibaWaiting?: boolean;
+  preGeneratedReply?: string | null;
+  eventReplySheet?: { item: LooseEnd; checkResult: import("@/lib/types").ScheduleCheckResult; initialReply: string | null } | null;
+  onEventReplyConfirm?: (payload: { proposed: import("@/lib/types").ProposedEvent; replyBody: string }) => void;
+  onEventReplyCancel?: () => void;
 }) {
   const { icon, label } = typeIcons[item.type];
   const [itemBody, setItemBody] = useState<string | null>(null);
@@ -257,22 +279,15 @@ export default function LooseEndCard({
 
         {/* Action buttons */}
         {item.actions && item.actions.length > 0 && onAction && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 pl-0 sm:pl-11">
+          <div className="mt-3 flex flex-wrap items-center gap-2 pl-0 sm:pl-11 pt-2 border-t border-le-border/10">
             {item.actions.map((action) => (
               <button
                 key={action.id}
                 onClick={() => onAction(action.id)}
                 disabled={isPending}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150 active:scale-[0.97] disabled:opacity-50 ${ACTION_STYLES[action.variant]}`}
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all duration-150 active:scale-[0.97] disabled:opacity-50 ${ACTION_STYLES[action.variant]}`}
               >
-                {isPending ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-3 w-3 animate-spin rounded-full border border-current/30 border-t-current" />
-                    Working...
-                  </span>
-                ) : (
-                  action.label
-                )}
+                {action.label}
               </button>
             ))}
           </div>
@@ -290,7 +305,7 @@ export default function LooseEndCard({
             >
               <div className="mt-4 border-t border-le-border/30 pt-4">
                 {/* Body content */}
-                <div className="max-h-60 overflow-y-auto overscroll-contain rounded-lg border border-le-border/40 bg-le-void/50 p-3">
+                <div className="max-h-60 overflow-y-auto overscroll-contain rounded-lg border border-le-border/20 bg-le-void/60 p-3.5">
                   {isLoadingBody ? (
                     <div className="space-y-2">
                       <div className="h-3 w-full animate-pulse rounded bg-le-elevated/60" />
@@ -350,14 +365,60 @@ export default function LooseEndCard({
                   <span className="text-[11px] text-le-text">{item.source}</span>
                 </div>
 
+                {/* CIBA approval pending indicator */}
+                {cibaWaiting && (
+                  <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3.5">
+                    <div className="relative flex h-5 w-5 items-center justify-center">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400/20" />
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="relative h-4 w-4 text-amber-400">
+                        <path fillRule="evenodd" d="M8 1a3.5 3.5 0 00-3.5 3.5V8H4a2 2 0 00-2 2v4a2 2 0 002 2h8a2 2 0 002-2v-4a2 2 0 00-2-2h-.5V4.5A3.5 3.5 0 008 1zm2 7V4.5a2 2 0 10-4 0V8h4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-amber-400">Approve on your phone</p>
+                      <p className="text-[10px] text-le-muted/60 mt-0.5">Booking event + generating reply...</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Inline ActionConfirmSheet */}
                 <AnimatePresence>
-                  {confirmAction && confirmAction.item.id === item.id && onConfirm && onCancelConfirm && (
+                  {confirmAction && confirmAction.item.id === item.id && onConfirm && onCancelConfirm && !cibaWaiting && (
                     <ActionConfirmSheet
                       item={confirmAction.item}
                       actionId={confirmAction.actionId}
                       onConfirm={onConfirm}
                       onCancel={onCancelConfirm}
+                      isPending={isPending || false}
+                      initialReply={preGeneratedReply}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Inline ScheduleSheet (for conflict resolution) */}
+                <AnimatePresence>
+                  {scheduleCheck && scheduleCheck.item.id === item.id && onScheduleCreate && onScheduleCancel && (
+                    <ScheduleSheet
+                      item={item}
+                      checkResult={scheduleCheck.result}
+                      onCreateEvent={(proposed) => onScheduleCreate(proposed)}
+                      onCreateAtSlot={(slot) => onScheduleSlot?.(slot)}
+                      onReplyWithAlternatives={(slots) => onScheduleReply?.(slots)}
+                      onCancel={onScheduleCancel}
+                      isPending={isPending || false}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Combined Book & Reply form */}
+                <AnimatePresence>
+                  {eventReplySheet && eventReplySheet.item.id === item.id && onEventReplyConfirm && onEventReplyCancel && (
+                    <EventReplySheet
+                      item={item}
+                      checkResult={eventReplySheet.checkResult}
+                      initialReply={eventReplySheet.initialReply}
+                      onConfirm={onEventReplyConfirm}
+                      onCancel={onEventReplyCancel}
                       isPending={isPending || false}
                     />
                   )}

@@ -3,8 +3,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useScan } from "@/lib/hooks/useScan";
-import { useSuggestions } from "@/lib/hooks/useSuggestions";
-import type { LooseEnd, JunkEmail } from "@/lib/types";
+// Suggestions now come from useScan (fetched after scan completes)
+import type { LooseEnd, LooseEndAction, JunkEmail, ScheduleCheckResult, ProposedEvent, FreeSlot } from "@/lib/types";
+import type { UserPermissions } from "@/lib/fga";
 import DashboardHeader from "./DashboardHeader";
 import FilterTabs from "./FilterTabs";
 import Sidebar from "./Sidebar";
@@ -21,7 +22,7 @@ function TimelineSkeleton() {
   return (
     <div className="relative">
       <div className="absolute left-[11px] top-0 bottom-0 w-px bg-le-border/20 animate-pulse" />
-      {(["Now", "This Week", "Whenever"] as const).map((label, i) => (
+      {(["Urgent", "Needs Attention", "Low Priority"] as const).map((label, i) => (
         <div key={label} className="mb-8">
           <div
             className="flex items-center gap-3 mb-4"
@@ -104,6 +105,16 @@ function TimelineBucket({
   confirmAction,
   onConfirm,
   onCancelConfirm,
+  scheduleCheck,
+  onScheduleCreate,
+  onScheduleSlot,
+  onScheduleReply,
+  onScheduleCancel,
+  cibaWaiting,
+  preGeneratedReply,
+  eventReplySheet,
+  onEventReplyConfirm,
+  onEventReplyCancel,
   defaultCollapsed = false,
 }: {
   label: string;
@@ -119,6 +130,16 @@ function TimelineBucket({
   confirmAction: { item: LooseEnd; actionId: string } | null;
   onConfirm: (payload: { body: string }) => void;
   onCancelConfirm: () => void;
+  scheduleCheck: { item: LooseEnd; result: ScheduleCheckResult } | null;
+  onScheduleCreate: (item: LooseEnd, proposed: ProposedEvent) => void;
+  onScheduleSlot: (item: LooseEnd, slot: FreeSlot) => void;
+  onScheduleReply: (item: LooseEnd, freeSlots: FreeSlot[]) => void;
+  onScheduleCancel: () => void;
+  cibaWaiting?: string | null;
+  preGeneratedReply?: string | null;
+  eventReplySheet?: { item: LooseEnd; checkResult: ScheduleCheckResult; initialReply: string | null } | null;
+  onEventReplyConfirm?: (payload: { proposed: ProposedEvent; replyBody: string }) => void;
+  onEventReplyCancel?: () => void;
   defaultCollapsed?: boolean;
 }) {
   const PREVIEW_COUNT = 2;
@@ -216,6 +237,18 @@ function TimelineBucket({
                 }
                 onConfirm={onConfirm}
                 onCancelConfirm={onCancelConfirm}
+                scheduleCheck={
+                  scheduleCheck?.item.id === item.id ? scheduleCheck : null
+                }
+                onScheduleCreate={(proposed) => onScheduleCreate(item, proposed)}
+                onScheduleSlot={(slot) => onScheduleSlot(item, slot)}
+                onScheduleReply={(slots) => onScheduleReply(item, slots)}
+                onScheduleCancel={onScheduleCancel}
+                cibaWaiting={cibaWaiting === item.id}
+                preGeneratedReply={confirmAction?.item.id === item.id ? preGeneratedReply : null}
+                eventReplySheet={eventReplySheet?.item.id === item.id ? eventReplySheet : null}
+                onEventReplyConfirm={onEventReplyConfirm}
+                onEventReplyCancel={onEventReplyCancel}
               />
             </motion.div>
           ))}
@@ -264,22 +297,25 @@ export default function DashboardShell({
     denied,
     scan,
     lastScannedAt,
-    removeItem,
     dismissItem,
     clearJunk,
     rescueJunkEmail,
-    autonomousStatus,
+    agentSuggestions,
+    textSuggestions: suggestions,
+    suggestionsLoading,
   } = useScan();
-  const { suggestions, isLoading: suggestionsLoading } =
-    useSuggestions(looseEnds);
   const [autoActEnabled, setAutoCleanEnabled] = useState(false);
+  const [permissions, setPermissions] = useState<UserPermissions | null>(null);
 
-  // Load autonomy setting
+  // Load FGA permissions (used for autonomy toggle + filtering card actions)
   useEffect(() => {
     fetch("/api/permissions")
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data?.autonomy?.auto_act) setAutoCleanEnabled(true);
+        if (data) {
+          setPermissions(data as UserPermissions);
+          if (data.autonomy?.auto_act) setAutoCleanEnabled(true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -297,6 +333,18 @@ export default function DashboardShell({
     null,
   );
   const [eventCreated, setEventCreated] = useState<Set<string>>(new Set());
+  const [scheduleCheck, setScheduleCheck] = useState<{ item: LooseEnd; result: ScheduleCheckResult } | null>(null);
+  const [_pendingReschedule, setPendingReschedule] = useState<{
+    item: LooseEnd;
+    context: { proposedTime: string; conflictNames: string[]; freeSlots: Array<{ label: string }> };
+  } | null>(null);
+  const [cibaWaiting, setCibaWaiting] = useState<string | null>(null); // item ID waiting for CIBA
+  const [preGeneratedReply, _setPreGeneratedReply] = useState<string | null>(null);
+  const [eventReplySheet, setEventReplySheet] = useState<{
+    item: LooseEnd;
+    checkResult: ScheduleCheckResult;
+    initialReply: string | null;
+  } | null>(null);
   const [viewMode, setViewMode] = useState<"timeline" | "tiles">(() => {
     if (typeof window !== "undefined") {
       return (sessionStorage.getItem("le-view-mode") as "timeline" | "tiles") || "timeline";
@@ -326,7 +374,35 @@ export default function DashboardShell({
     slack: denied.includes("slack"),
   }), [denied]);
 
-  // Enrich with suggestions + swap "Create Event" to done state
+  /**
+   * Map (item.type, action.id) → FGA permission key.
+   * Actions not listed here (e.g. "open") are always shown.
+   */
+  function isActionPermitted(
+    itemType: LooseEnd["type"],
+    action: LooseEndAction,
+  ): boolean {
+    if (!permissions) return true; // permissions not loaded yet — show all
+    const key = `${itemType}:${action.id}`;
+    switch (key) {
+      case "email:reply":
+        return permissions.gmail.can_reply;
+      case "email:trash":
+        return permissions.gmail.can_delete;
+      case "github:comment":
+        return permissions.github.can_comment;
+      case "github:approve":
+        return permissions.github.can_approve;
+      case "slack:reply":
+        return permissions.slack.can_send;
+      case "calendar:create-event":
+        return permissions.calendar.can_create;
+      default:
+        return true; // "open", "dismiss", etc. are always allowed
+    }
+  }
+
+  // Enrich with suggestions + swap "Create Event" to done state + filter by FGA permissions
   function enrichItems(items: LooseEnd[]): LooseEnd[] {
     return items.map((le) => {
       const enriched = {
@@ -340,24 +416,30 @@ export default function DashboardShell({
             : a
         );
       }
+      // Filter out actions the user doesn't have FGA permission for
+      if (enriched.actions) {
+        enriched.actions = enriched.actions.filter((a) =>
+          isActionPermitted(le.type, a),
+        );
+      }
       return enriched;
     });
   }
 
-  // Filter items, then bucket by urgency
-  const { now, thisWeek, whenever, enrichedAll } = useMemo(() => {
+  // Filter items, then bucket by urgency/priority
+  const { urgent, needsAttention, lowPriority, enrichedAll } = useMemo(() => {
     const all = enrichItems(looseEnds);
     const filtered =
       filter === "all" ? all : all.filter((le) => le.type === filter);
 
     return {
-      now: filtered.filter((le) => le.urgency === "red"),
-      thisWeek: filtered.filter((le) => le.urgency === "yellow"),
-      whenever: filtered.filter((le) => le.urgency === "green"),
+      urgent: filtered.filter((le) => le.urgency === "red"),
+      needsAttention: filtered.filter((le) => le.urgency === "yellow"),
+      lowPriority: filtered.filter((le) => le.urgency === "green"),
       enrichedAll: filtered,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [looseEnds, suggestions, filter, eventCreated]);
+  }, [looseEnds, suggestions, filter, eventCreated, permissions]);
 
   // Counts for FilterTabs
   const counts = useMemo<Record<FilterType, number>>(
@@ -403,7 +485,7 @@ export default function DashboardShell({
         body: JSON.stringify({ messageId }),
       });
       if (res.ok) {
-        removeItem(item.id);
+        dismissItem(item);
       } else if (res.status === 403) {
         setPermissionError(
           "Permission denied: enable Gmail Delete in Settings > Agent Permissions.",
@@ -445,55 +527,195 @@ export default function DashboardShell({
     }
   }
 
-  async function handleCreateEvent(item: LooseEnd, force = false) {
+  // Mode 1 (manual): Check schedule + generate reply in parallel → show combined form
+  async function handleCreateEvent(item: LooseEnd) {
+    setActionPending((prev) => ({ ...prev, [item.id]: true }));
+    setExpandedItemId(item.id);
+
+    try {
+      // Fire both in parallel — both are fast, no CIBA
+      const [checkResult, replyResult] = await Promise.allSettled([
+        fetch("/api/actions/check-schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item }),
+        }).then((r) => r.json()),
+        fetch("/api/actions/generate-reply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item }),
+        }).then((r) => r.json()),
+      ]);
+
+      const check = checkResult.status === "fulfilled" ? checkResult.value : null;
+      const reply = replyResult.status === "fulfilled" ? replyResult.value : null;
+
+      if (check) {
+        // Show the combined EventReplySheet
+        setEventReplySheet({
+          item,
+          checkResult: check,
+          initialReply: reply?.reply || null,
+        });
+      }
+    } catch (err) {
+      console.error("Book & Reply check failed:", err);
+    } finally {
+      setActionPending((prev) => ({ ...prev, [item.id]: false }));
+    }
+  }
+
+  // When user confirms in EventReplySheet — create event + send reply, no CIBA
+  async function handleEventReplyConfirm(payload: { proposed: ProposedEvent; replyBody: string }) {
+    if (!eventReplySheet) return;
+    const { item } = eventReplySheet;
+    setActionPending((prev) => ({ ...prev, [item.id]: true }));
+
+    try {
+      // Fire both in parallel — skipCiba since user confirmed in-app
+      const [eventRes] = await Promise.allSettled([
+        fetch("/api/actions/create-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item, force: true, proposed: payload.proposed, skipCiba: true }),
+        }).then((r) => r.json()),
+        fetch("/api/actions/reply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            threadId: item.meta?.threadId,
+            to: item.meta?.from || item.source,
+            subject: item.meta?.subject || item.title,
+            body: payload.replyBody,
+            messageId: item.meta?.rfcMessageId,
+            sendDirectly: true,
+          }),
+        }),
+      ]);
+
+      const eventData = eventRes.status === "fulfilled" ? eventRes.value : null;
+      if (eventData?.success) {
+        setEventCreated((prev) => new Set(prev).add(item.id));
+      }
+
+      setEventReplySheet(null);
+      dismissItem(item);
+    } catch (err) {
+      console.error("Book & Reply confirm failed:", err);
+    } finally {
+      setActionPending((prev) => ({ ...prev, [item.id]: false }));
+    }
+  }
+
+  // Mode 2 (auto-act): Agent autonomously books + replies via CIBA
+  async function handleAutoBookAndReply(item: LooseEnd) {
+    setCibaWaiting(item.id);
+    try {
+      const res = await fetch("/api/autonomous/book-and-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item }),
+      });
+      const data = await res.json();
+      if (data.conflict) return; // conflict found, don't auto-act
+      if (data.approved && data.success) {
+        setEventCreated((prev) => new Set(prev).add(item.id));
+        dismissItem(item);
+      }
+    } catch (err) {
+      console.error("Auto book & reply failed:", err);
+    } finally {
+      setCibaWaiting(null);
+    }
+  }
+
+  // Mode 2 (auto-act): Agent autonomously sends email/comment/slack via CIBA
+  async function handleAutoAction(
+    action: "send_email" | "post_comment" | "send_slack",
+    item: LooseEnd,
+    params: Record<string, string>,
+  ) {
+    const endpointMap = {
+      send_email: "/api/autonomous/send-email",
+      post_comment: "/api/autonomous/post-comment",
+      send_slack: "/api/autonomous/send-slack",
+    };
+    setCibaWaiting(item.id);
+    try {
+      const res = await fetch(endpointMap[action], {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item, params }),
+      });
+      const data = await res.json();
+      if (data.approved && data.success) {
+        dismissItem(item);
+      } else if (data.approved === false) {
+        setPermissionError(data.error || "Action not approved on phone.");
+      }
+    } catch (err) {
+      console.error(`Auto ${action} failed:`, err);
+    } finally {
+      setCibaWaiting(null);
+    }
+  }
+
+  // Phase 2: Actually create the event (called from ScheduleSheet)
+  async function doCreateEvent(item: LooseEnd, proposed: ProposedEvent) {
     setActionPending((prev) => ({ ...prev, [item.id]: true }));
     try {
       const res = await fetch("/api/actions/create-event", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item, force }),
+        body: JSON.stringify({ item, force: true, proposed }),
       });
       if (!res.ok) {
-        if (res.status === 403) {
-          setPermissionError(
-            "Permission denied: enable Calendar Create in Settings > Agent Permissions.",
-          );
-        }
+        if (res.status === 403) setPermissionError("Permission denied: enable Calendar Create in Settings.");
         return;
       }
       const data = await res.json();
-
-      if (data.conflict) {
-        // Show conflict — let user decide
-        const conflictNames = data.conflicts
-          .map((c: { summary: string }) => c.summary)
-          .join(", ");
-        const proposed = data.proposed;
-        const proceed = window.confirm(
-          `Conflict detected!\n\nYou have "${conflictNames}" during ${proposed.startTime}–${proposed.endTime} on ${proposed.date}.\n\nCreate "${proposed.summary}" anyway?`
-        );
-        if (proceed) {
-          await handleCreateEvent(item, true);
-        }
-        return;
-      }
-
-      // CIBA denied
       if (data.approved === false) {
-        setPermissionError(
-          data.error || "Action not approved. Check Auth0 Guardian on your phone.",
-        );
+        setPermissionError(data.error || "Action not approved. Check Auth0 Guardian on your phone.");
         return;
       }
-
-      // Success
-      setEventCreated((prev) => new Set(prev).add(item.id));
-      if (data.event?.htmlLink) window.open(data.event.htmlLink, "_blank");
+      if (data.success) {
+        setEventCreated((prev) => new Set(prev).add(item.id));
+        setScheduleCheck(null);
+        if (data.event?.htmlLink) window.open(data.event.htmlLink, "_blank");
+      }
     } catch (err) {
       console.error("Create event failed:", err);
     } finally {
       setActionPending((prev) => ({ ...prev, [item.id]: false }));
     }
+  }
+
+  // Create event at a specific free slot
+  function handleCreateAtSlot(item: LooseEnd, slot: FreeSlot) {
+    if (!scheduleCheck) return;
+    const proposed: ProposedEvent = {
+      ...scheduleCheck.result.proposed,
+      date: slot.date,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    };
+    doCreateEvent(item, proposed);
+  }
+
+  // Reply with reschedule alternatives
+  function handleReplyWithAlternatives(item: LooseEnd, freeSlots: FreeSlot[]) {
+    setScheduleCheck(null);
+    setConfirmAction({ item, actionId: "reply" });
+    setExpandedItemId(item.id);
+    // Store reschedule context so ActionConfirmSheet can auto-generate with it
+    setPendingReschedule({
+      item,
+      context: {
+        proposedTime: `${scheduleCheck?.result.proposed.startTime}–${scheduleCheck?.result.proposed.endTime}`,
+        conflictNames: scheduleCheck?.result.conflicts.map((c) => c.summary) || [],
+        freeSlots: freeSlots.map((s) => ({ label: s.label })),
+      },
+    });
   }
 
   function handleAction(actionId: string, item: LooseEnd) {
@@ -544,7 +766,7 @@ export default function DashboardShell({
             "Permission denied: enable Gmail Reply in Settings > Agent Permissions.",
           );
         } else if (res.ok) {
-          removeItem(item.id);
+          dismissItem(item);
         }
       } else if (actionId === "reply" && item.type === "slack") {
         const res = await fetch("/api/actions/slack-reply", {
@@ -561,7 +783,7 @@ export default function DashboardShell({
             "Permission denied: enable Slack Send in Settings > Agent Permissions.",
           );
         } else if (res.ok) {
-          removeItem(item.id);
+          dismissItem(item);
         }
       } else if (actionId === "comment" && item.type === "github") {
         const res = await fetch("/api/actions/github-comment", {
@@ -579,7 +801,7 @@ export default function DashboardShell({
             "Permission denied: enable GitHub Comment in Settings > Agent Permissions.",
           );
         } else if (res.ok) {
-          removeItem(item.id);
+          dismissItem(item);
         }
       }
     } catch (err) {
@@ -647,6 +869,7 @@ export default function DashboardShell({
               looseEnds={looseEnds}
               junkEmails={junkEmails}
               suggestions={suggestions}
+              agentSuggestions={agentSuggestions}
               onJunkCleanup={handleBulkTrash}
               onItemAction={handleAction}
               onOpenItem={(id) => {
@@ -657,6 +880,8 @@ export default function DashboardShell({
               onRescueJunk={rescueJunkEmail}
               autoActEnabled={autoActEnabled}
               eventCreatedIds={eventCreated}
+              onAutoBookAndReply={handleAutoBookAndReply}
+              onAutoAction={handleAutoAction}
             />
           </div>
         )}
@@ -691,13 +916,13 @@ export default function DashboardShell({
               {/* The continuous timeline spine */}
               <div className="absolute left-[11px] top-0 bottom-0 w-px bg-le-border/40" />
 
-              {/* NOW bucket */}
-              {now.length > 0 && (
+              {/* URGENT bucket */}
+              {urgent.length > 0 && (
                 <TimelineBucket
-                  label="Now"
+                  label="Urgent"
                   color="red"
-                  count={now.length}
-                  items={now}
+                  count={urgent.length}
+                  items={urgent}
                   expandedItemId={expandedItemId}
                   onToggleExpand={handleToggleExpand}
                   suggestionsLoading={suggestionsLoading}
@@ -707,16 +932,26 @@ export default function DashboardShell({
                   confirmAction={confirmAction}
                   onConfirm={handleConfirm}
                   onCancelConfirm={handleCancelConfirm}
+                  scheduleCheck={scheduleCheck}
+                  onScheduleCreate={(item, proposed) => doCreateEvent(item, proposed)}
+                  onScheduleSlot={(item, slot) => handleCreateAtSlot(item, slot)}
+                  onScheduleReply={(item, slots) => handleReplyWithAlternatives(item, slots)}
+                  onScheduleCancel={() => setScheduleCheck(null)}
+                  cibaWaiting={cibaWaiting}
+                  preGeneratedReply={preGeneratedReply}
+                  eventReplySheet={eventReplySheet}
+                  onEventReplyConfirm={handleEventReplyConfirm}
+                  onEventReplyCancel={() => setEventReplySheet(null)}
                 />
               )}
 
-              {/* THIS WEEK bucket */}
-              {thisWeek.length > 0 && (
+              {/* NEEDS ATTENTION bucket */}
+              {needsAttention.length > 0 && (
                 <TimelineBucket
-                  label="This Week"
+                  label="Needs Attention"
                   color="yellow"
-                  count={thisWeek.length}
-                  items={thisWeek}
+                  count={needsAttention.length}
+                  items={needsAttention}
                   expandedItemId={expandedItemId}
                   onToggleExpand={handleToggleExpand}
                   suggestionsLoading={suggestionsLoading}
@@ -726,19 +961,29 @@ export default function DashboardShell({
                   confirmAction={confirmAction}
                   onConfirm={handleConfirm}
                   onCancelConfirm={handleCancelConfirm}
+                  scheduleCheck={scheduleCheck}
+                  onScheduleCreate={(item, proposed) => doCreateEvent(item, proposed)}
+                  onScheduleSlot={(item, slot) => handleCreateAtSlot(item, slot)}
+                  onScheduleReply={(item, slots) => handleReplyWithAlternatives(item, slots)}
+                  onScheduleCancel={() => setScheduleCheck(null)}
+                  cibaWaiting={cibaWaiting}
+                  preGeneratedReply={preGeneratedReply}
+                  eventReplySheet={eventReplySheet}
+                  onEventReplyConfirm={handleEventReplyConfirm}
+                  onEventReplyCancel={() => setEventReplySheet(null)}
                 />
               )}
 
-              {/* WHENEVER bucket — collapsed by default to reduce scroll */}
-              {whenever.length > 0 && (
+              {/* LOW PRIORITY bucket — collapsed by default to reduce scroll */}
+              {lowPriority.length > 0 && (
                 <TimelineBucket
-                  label="Whenever"
+                  label="Low Priority"
                   color="green"
-                  count={whenever.length}
-                  items={whenever}
+                  count={lowPriority.length}
+                  items={lowPriority}
                   expandedItemId={expandedItemId}
                   onToggleExpand={handleToggleExpand}
-                  defaultCollapsed={whenever.length > 3}
+                  defaultCollapsed={lowPriority.length > 3}
                   suggestionsLoading={suggestionsLoading}
                   actionPending={actionPending}
                   onAction={handleAction}
@@ -746,6 +991,16 @@ export default function DashboardShell({
                   confirmAction={confirmAction}
                   onConfirm={handleConfirm}
                   onCancelConfirm={handleCancelConfirm}
+                  scheduleCheck={scheduleCheck}
+                  onScheduleCreate={(item, proposed) => doCreateEvent(item, proposed)}
+                  onScheduleSlot={(item, slot) => handleCreateAtSlot(item, slot)}
+                  onScheduleReply={(item, slots) => handleReplyWithAlternatives(item, slots)}
+                  onScheduleCancel={() => setScheduleCheck(null)}
+                  cibaWaiting={cibaWaiting}
+                  preGeneratedReply={preGeneratedReply}
+                  eventReplySheet={eventReplySheet}
+                  onEventReplyConfirm={handleEventReplyConfirm}
+                  onEventReplyCancel={() => setEventReplySheet(null)}
                 />
               )}
             </div>
@@ -802,7 +1057,7 @@ export default function DashboardShell({
       </div>
 
       {/* Right sidebar -- hidden on mobile */}
-      <Sidebar items={looseEnds} junkCount={junkEmails.length} />
+      <Sidebar items={looseEnds} />
 
       {/* Floating chat panel — always visible, all breakpoints */}
       <ChatDrawer />

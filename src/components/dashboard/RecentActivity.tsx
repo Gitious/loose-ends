@@ -52,7 +52,7 @@ function actionLabel(action: string): string {
 
 function statusDotClass(entry: AuditEntry): string {
   if (!entry.permitted) return "bg-le-red";
-  if (!entry.success) return "bg-amber-400";
+  if (!entry.success) return "bg-le-red";
   return "bg-emerald-400";
 }
 
@@ -65,7 +65,7 @@ export default function RecentActivity() {
       const res = await fetch("/api/audit");
       if (res.ok) {
         const data = await res.json();
-        setEntries((data.entries || []).slice(0, 5));
+        setEntries((data.entries || []).slice(0, 10));
       }
     } catch {
       // Silently fail
@@ -87,7 +87,7 @@ export default function RecentActivity() {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-le-text">Recent Activity</h3>
         <Link
-          href="/settings"
+          href="/settings#audit"
           className="text-[11px] text-le-accent hover:text-le-accent/80 transition-colors"
         >
           View all
@@ -118,13 +118,8 @@ export default function RecentActivity() {
               />
 
               {/* Description */}
-              <span className="text-xs text-le-text truncate flex-1">
+              <span className="text-xs text-le-text truncate flex-1 min-w-0">
                 {actionLabel(entry.action)}
-                {entry.details ? (
-                  <span className="text-le-muted"> &mdash; {entry.details}</span>
-                ) : entry.target ? (
-                  <span className="text-le-muted"> &mdash; {entry.target}</span>
-                ) : null}
               </span>
 
               {/* Relative time */}

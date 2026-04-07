@@ -3,6 +3,7 @@ import { loadPermissions, checkPermission } from "@/lib/fga";
 import sql, { ensureTables } from "@/lib/db";
 import { sanitizeUserId } from "@/lib/storage";
 import { sendSlackDM, formatLooseEndsForSlack } from "@/lib/slack-notify";
+import { buildPlate, savePlate } from "@/lib/plate";
 import type { LooseEnd, LooseEndAction, JunkEmail } from "@/lib/types";
 
 export const maxDuration = 30;
@@ -12,13 +13,10 @@ const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const GH_API = "https://api.github.com";
 const SLACK_API = "https://slack.com/api";
 
-const SCHEDULING_RE = /\b(meet|meeting|call|catch up|sync|1[:\-]?on[:\-]?1|coffee|lunch|dinner|schedule|slot|available|availability|free at|block.?(time|calendar)|calendar invite|let'?s (talk|chat|connect|hop on)|(?:at|by|around|before|after)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday))\b/i;
-
-function looksLikeScheduling(item: LooseEnd): boolean {
-  const subject = item.meta?.subject || item.title || "";
-  const desc = item.description || "";
-  return SCHEDULING_RE.test(subject) || SCHEDULING_RE.test(desc);
-}
+// Scheduling detection is handled by the AI intelligence layer (suggest endpoint),
+// not by regex. The AI understands intent — it won't suggest booking when someone
+// is declining or canceling. The "Book & Reply" button only appears when the AI
+// suggests a book_and_reply action.
 
 function addActions(item: LooseEnd): LooseEnd {
   const actions: LooseEndAction[] = [];
@@ -27,9 +25,6 @@ function addActions(item: LooseEnd): LooseEnd {
   switch (item.type) {
     case "email":
       actions.push({ id: "reply", label: "Reply", variant: "primary" });
-      if (looksLikeScheduling(item)) {
-        actions.push({ id: "create-event", label: "Create Event", variant: "secondary" });
-      }
       actions.push({ id: "trash", label: "Trash", variant: "secondary" });
       if (item.meta?.threadId) {
         deepLink = `https://mail.google.com/mail/#inbox/${item.meta.threadId}`;
@@ -51,9 +46,6 @@ function addActions(item: LooseEnd): LooseEnd {
       break;
     case "slack":
       actions.push({ id: "reply", label: "Reply", variant: "primary" });
-      if (looksLikeScheduling(item)) {
-        actions.push({ id: "create-event", label: "Create Event", variant: "secondary" });
-      }
       if (item.meta?.permalink) deepLink = item.meta.permalink;
       actions.push({ id: "open", label: "Open", variant: "ghost" });
       break;
@@ -139,7 +131,7 @@ async function scanGmailDirect(token: string): Promise<{ looseEnds: LooseEnd[]; 
 
   // Batch-fetch message metadata in parallel (batches of 10)
   const BATCH = 10;
-  const seenThreads = new Set<string>();       // for deduping thread metadata fetches
+  const threadCache = new Map<string, any>();   // threadId → thread data (reused across messages in same thread)
   const threadHasLooseEnd = new Set<string>();  // one loose end per thread
   for (let i = 0; i < messages.length; i += BATCH) {
     const batch = messages.slice(i, i + BATCH);
@@ -148,15 +140,18 @@ async function scanGmailDirect(token: string): Promise<{ looseEnds: LooseEnd[]; 
         try {
           const [msgRes, threadRes] = await Promise.all([
             fetch(`${GMAIL_API}/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=List-Unsubscribe&metadataHeaders=Precedence`, { headers: { Authorization: `Bearer ${token}` } }),
-            msg.threadId && !seenThreads.has(msg.threadId)
+            msg.threadId && !threadCache.has(msg.threadId)
               ? fetch(`${GMAIL_API}/threads/${msg.threadId}?format=metadata&metadataHeaders=From`, { headers: { Authorization: `Bearer ${token}` } })
               : null,
           ]);
           if (!msgRes.ok) return null;
           const msgData = await msgRes.json();
-          if (msg.threadId) seenThreads.add(msg.threadId);
           const threadData = threadRes?.ok ? await threadRes.json() : null;
-          return { msg, msgData, threadData };
+          // Cache thread data so subsequent messages in the same thread can reuse it
+          if (msg.threadId && threadData) threadCache.set(msg.threadId, threadData);
+          // For messages whose thread was already fetched, use the cached data
+          const resolvedThreadData = threadData || (msg.threadId ? threadCache.get(msg.threadId) : null) || null;
+          return { msg, msgData, threadData: resolvedThreadData };
         } catch { return null; }
       })
     );
@@ -543,8 +538,6 @@ async function scanSlackDirect(token: string): Promise<LooseEnd[]> {
   if (!authData.ok) return [];
   const userId = authData.user_id;
   const looseEnds: LooseEnd[] = [];
-  const cutoff7d = Math.floor((Date.now() - 7 * 86400000) / 1000);
-  const cutoff30d = Math.floor((Date.now() - 30 * 86400000) / 1000);
   const slackHeaders = { Authorization: `Bearer ${token}` };
 
   // Fetch DMs, group DMs, and channels in parallel
@@ -631,82 +624,100 @@ async function scanSlackDirect(token: string): Promise<LooseEnd[]> {
     }
   }
 
-  // Process group DMs
+  // Process group DMs in parallel
   if (mpimRes.ok) {
     const mpimData = await mpimRes.json();
-    for (const ch of (mpimData.channels ?? []).slice(0, 8)) {
-      try {
-        const histRes = await fetch(
-          `${SLACK_API}/conversations.history?channel=${ch.id}&limit=3`,
-          { headers: slackHeaders }
-        );
-        if (!histRes.ok) continue;
-        const histData = await histRes.json();
-        const msgs = histData.messages ?? [];
-        if (msgs.length === 0) continue;
-        const latest = msgs[0];
-        if (latest.subtype) continue;
+    const mpimChannels = (mpimData.channels ?? []).slice(0, 8);
+    const mpimResults = await Promise.all(
+      mpimChannels.map(async (ch: { id: string; name?: string }) => {
+        try {
+          const histRes = await fetch(
+            `${SLACK_API}/conversations.history?channel=${ch.id}&limit=3`,
+            { headers: slackHeaders }
+          );
+          if (!histRes.ok) return null;
+          const histData = await histRes.json();
+          const msgs = histData.messages ?? [];
+          if (msgs.length === 0 || msgs[0].subtype) return null;
+          return { ch, latest: msgs[0] };
+        } catch { return null; }
+      })
+    );
+    for (const r of mpimResults) {
+      if (!r) continue;
+      const { ch, latest } = r;
+      const ts = parseFloat(latest.ts ?? "0");
+      const ageDays = Math.floor((Date.now() / 1000 - ts) / 86400);
 
-        const ts = parseFloat(latest.ts ?? "0");
-        const ageDays = Math.floor((Date.now() / 1000 - ts) / 86400);
+      // Resolve group member names (from channel name like "mpdm-user1--user2--user3-1")
+      const memberNames: string[] = [];
+      if (ch.name) {
+        const parts = ch.name.replace(/^mpdm-/, "").replace(/-\d+$/, "").split("--");
+        for (const p of parts.slice(0, 3)) memberNames.push(p);
+      }
+      const groupName = memberNames.length > 0 ? memberNames.join(", ") : "Group DM";
 
-        // Resolve group member names (from channel name like "mpdm-user1--user2--user3-1")
-        const memberNames: string[] = [];
-        if (ch.name) {
-          const parts = ch.name.replace(/^mpdm-/, "").replace(/-\d+$/, "").split("--");
-          for (const p of parts.slice(0, 3)) memberNames.push(p);
-        }
-        const groupName = memberNames.length > 0 ? memberNames.join(", ") : "Group DM";
-
-        const isUnanswered = latest.user !== userId;
-        looseEnds.push({
-          id: `slack-group-${ch.id}`,
-          type: "slack",
-          title: isUnanswered ? `Unanswered in group: ${groupName}` : `Group chat: ${groupName}`,
-          description: (latest.text ?? "").slice(0, 80),
-          urgency: isUnanswered ? (ageDays > 3 ? "yellow" : "green") : "green",
-          age: ageDays === 0 ? "today" : `${ageDays}d ago`,
-          source: "Slack",
-          actionLabel: isUnanswered ? "Reply" : "Open",
-          meta: { channel: ch.id, ts: latest.ts },
-        });
-      } catch { continue; }
+      const isUnanswered = latest.user !== userId;
+      looseEnds.push({
+        id: `slack-group-${ch.id}`,
+        type: "slack",
+        title: isUnanswered ? `Unanswered in group: ${groupName}` : `Group chat: ${groupName}`,
+        description: (latest.text ?? "").slice(0, 80),
+        urgency: isUnanswered ? (ageDays > 3 ? "yellow" : "green") : "green",
+        age: ageDays === 0 ? "today" : `${ageDays}d ago`,
+        source: "Slack",
+        actionLabel: isUnanswered ? "Reply" : "Open",
+        meta: { channel: ch.id, ts: latest.ts },
+      });
     }
   }
 
-  // Also show recent channel activity (mentions and active channels)
+  // Also show recent channel activity (mentions and active channels) — in parallel
   if (chanRes.ok) {
     const chanData = await chanRes.json();
-    for (const ch of (chanData.channels ?? []).slice(0, 5)) {
-      try {
-        const histRes = await fetch(
-          `${SLACK_API}/conversations.history?channel=${ch.id}&limit=1`,
-          { headers: slackHeaders }
-        );
-        if (!histRes.ok) continue;
-        const histData = await histRes.json();
-        const msgs = histData.messages ?? [];
-        if (msgs.length === 0) continue;
-        const latest = msgs[0];
-        if (latest.subtype) continue;
-
-        const ts = parseFloat(latest.ts ?? "0");
-        const ageDays = Math.floor((Date.now() / 1000 - ts) / 86400);
-        if (ageDays > 7) continue; // skip stale channels
-
-        const senderName = await resolveUser(latest.user);
-        looseEnds.push({
-          id: `slack-chan-${ch.id}`,
-          type: "slack",
-          title: `#${ch.name}`,
-          description: `${senderName}: ${(latest.text ?? "").slice(0, 60)}`,
-          urgency: "green",
-          age: ageDays === 0 ? "today" : `${ageDays}d ago`,
-          source: "Slack",
-          actionLabel: "Open",
-          meta: { channel: ch.id, ts: latest.ts },
-        });
-      } catch { continue; }
+    const channels = (chanData.channels ?? []).slice(0, 5);
+    // Fetch all channel histories in parallel
+    const chanResults = await Promise.all(
+      channels.map(async (ch: { id: string; name?: string }) => {
+        try {
+          const histRes = await fetch(
+            `${SLACK_API}/conversations.history?channel=${ch.id}&limit=1`,
+            { headers: slackHeaders }
+          );
+          if (!histRes.ok) return null;
+          const histData = await histRes.json();
+          const msgs = histData.messages ?? [];
+          if (msgs.length === 0 || msgs[0].subtype) return null;
+          const latest = msgs[0];
+          const ts = parseFloat(latest.ts ?? "0");
+          const ageDays = Math.floor((Date.now() / 1000 - ts) / 86400);
+          if (ageDays > 7) return null; // skip stale channels
+          return { ch, latest, ageDays };
+        } catch { return null; }
+      })
+    );
+    // Resolve all sender names in parallel
+    const userIdsForChans = new Set<string>();
+    for (const r of chanResults) {
+      if (r) userIdsForChans.add(r.latest.user);
+    }
+    await Promise.all([...userIdsForChans].map(uid => resolveUser(uid)));
+    // Build loose ends from results
+    for (const r of chanResults) {
+      if (!r) continue;
+      const { ch, latest, ageDays } = r;
+      const senderName = userNames[latest.user] || latest.user;
+      looseEnds.push({
+        id: `slack-chan-${ch.id}`,
+        type: "slack",
+        title: `#${ch.name}`,
+        description: `${senderName}: ${(latest.text ?? "").slice(0, 60)}`,
+        urgency: "green",
+        age: ageDays === 0 ? "today" : `${ageDays}d ago`,
+        source: "Slack",
+        actionLabel: "Open",
+        meta: { channel: ch.id, ts: latest.ts },
+      });
     }
   }
 
@@ -715,7 +726,15 @@ async function scanSlackDirect(token: string): Promise<LooseEnd[]> {
 
 export async function POST(req: Request) {
   let only: string | null = null;
-  try { const body = await req.json(); only = body?.only || null; } catch {}
+  try {
+    const body = await req.json();
+    const requested = body?.only;
+    // Validate `only` against known service types to prevent unexpected values
+    const validServices = ["email", "calendar", "github", "slack"];
+    if (typeof requested === "string" && validServices.includes(requested)) {
+      only = requested;
+    }
+  } catch {}
   return scan(only);
 }
 
@@ -724,22 +743,22 @@ async function scan(only?: string | null) {
   if (!session) return new Response("Unauthorized", { status: 401 });
 
   const userId = session.user?.sub || session.user?.email || "anonymous";
-  const permissions = await loadPermissions(userId);
 
   const errors: Record<string, string> = {};
   const services: Record<string, boolean> = { google: false, github: false, slack: false };
   const denied: string[] = [];
 
-  // Get tokens in parallel
-  const tokenResults = await Promise.allSettled([
-    auth0.getAccessTokenForConnection({ connection: "google-oauth2" }),
-    auth0.getAccessTokenForConnection({ connection: "github" }),
-    auth0.getAccessTokenForConnection({ connection: "sign-in-with-slack" }),
+  // Get tokens and permissions in parallel
+  const [permissions, googleTokenResult, githubTokenResult, slackTokenResult] = await Promise.all([
+    loadPermissions(userId),
+    auth0.getAccessTokenForConnection({ connection: "google-oauth2" }).catch(() => null),
+    auth0.getAccessTokenForConnection({ connection: "github" }).catch(() => null),
+    auth0.getAccessTokenForConnection({ connection: "sign-in-with-slack" }).catch(() => null),
   ]);
 
-  const googleToken = tokenResults[0].status === "fulfilled" ? tokenResults[0].value.token : null;
-  const githubToken = tokenResults[1].status === "fulfilled" ? tokenResults[1].value.token : null;
-  const slackToken = tokenResults[2].status === "fulfilled" ? tokenResults[2].value.token : null;
+  const googleToken = googleTokenResult?.token ?? null;
+  const githubToken = githubTokenResult?.token ?? null;
+  const slackToken = slackTokenResult?.token ?? null;
 
   if (googleToken) services.google = true;
   if (githubToken) services.github = true;
@@ -789,19 +808,19 @@ async function scan(only?: string | null) {
     }
   }
 
-  const [otherResults, gmailResult] = await Promise.all([
+  // Run scans and dismissed items query in parallel (dismissed query doesn't depend on scan results)
+  await ensureTables();
+  const [otherResults, gmailResult, dismissedRows] = await Promise.all([
     Promise.all(scanPromises),
     gmailScanPromise ?? Promise.resolve({ looseEnds: [], junkEmails: [] }),
+    sql`SELECT item_key FROM dismissed_items WHERE user_id = ${userId}`,
   ]);
 
   let allLooseEnds = [...gmailResult.looseEnds, ...otherResults.flat()].map(addActions);
   const junkEmails = gmailResult.junkEmails;
 
-  // Filter out dismissed items
-  await ensureTables();
-  const dismissedRows = await sql`
-    SELECT item_key FROM dismissed_items WHERE user_id = ${userId}
-  `;
+  // Duplicate/conflict detection happens in check-schedule endpoint when user clicks "Book & Reply"
+  // We don't pre-check here because we'd need AI to extract the proposed time first
   if (dismissedRows.length > 0) {
     const dismissedKeys = new Set(dismissedRows.map((r) => r.item_key as string));
     allLooseEnds = allLooseEnds.filter((le) => {
@@ -825,6 +844,10 @@ async function scan(only?: string | null) {
       (err) => console.error("[Slack Notify] Error:", err)
     );
   }
+
+  // Build and save plate context for the chat agent
+  const plate = buildPlate(allLooseEnds, junkEmails);
+  savePlate(userId, plate).catch((err) => console.error("[Plate] Save error:", err));
 
   return Response.json({ looseEnds: allLooseEnds, junkEmails, errors, services, denied });
 }

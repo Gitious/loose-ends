@@ -1,59 +1,64 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import type { LooseEnd } from "@/lib/types";
+import { useState, useEffect } from "react";
+import type { LooseEnd, JunkEmail, AgentSuggestion } from "@/lib/types";
 
-const CACHE_KEY = "le-suggestions";
-const CACHE_IDS_KEY = "le-suggestions-ids";
+interface SuggestionsResult {
+  suggestions: Record<string, string>;
+  agentSuggestions: AgentSuggestion[];
+  isLoading: boolean;
+}
 
-export function useSuggestions(looseEnds: LooseEnd[]) {
+let lastFetchedFingerprint = "";
+
+export function useSuggestions(
+  looseEnds: LooseEnd[],
+  junkEmails?: JunkEmail[],
+): SuggestionsResult {
   const [suggestions, setSuggestions] = useState<Record<string, string>>({});
+  const [agentSuggestions, setAgentSuggestions] = useState<AgentSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const looseEndsRef = useRef(looseEnds);
-  looseEndsRef.current = looseEnds;
 
-  const looseEndIds = looseEnds.map((le) => le.id).join(",");
+  const itemCount = looseEnds.length;
+  const junkCount = junkEmails?.length ?? 0;
 
   useEffect(() => {
-    if (!looseEndIds) return;
+    if (itemCount === 0 && junkCount === 0) return;
 
-    // Try restoring from cache first
-    try {
-      const cachedIds = sessionStorage.getItem(CACHE_IDS_KEY);
-      const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cachedIds === looseEndIds && cached) {
-        setSuggestions(JSON.parse(cached));
-        return; // Cache hit — don't fetch
-      }
-    } catch {}
+    const fingerprint = looseEnds.map((le) => le.id).sort().join(",") + "|" + junkCount;
+    if (fingerprint === lastFetchedFingerprint) return;
+    lastFetchedFingerprint = fingerprint;
 
-    // Cache miss — fetch fresh suggestions
-    let cancelled = false;
     setIsLoading(true);
+
+    const body = JSON.stringify({ looseEnds, junkEmails });
 
     fetch("/api/scan/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ looseEnds: looseEndsRef.current }),
+      body,
     })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+      })
       .then((data) => {
-        if (!cancelled) {
-          const s = data.suggestions || {};
-          setSuggestions(s);
-          try {
-            sessionStorage.setItem(CACHE_KEY, JSON.stringify(s));
-            sessionStorage.setItem(CACHE_IDS_KEY, looseEndIds);
-          } catch {}
+        if (Array.isArray(data.suggestions)) {
+          setAgentSuggestions(data.suggestions);
+          setSuggestions(data.textSuggestions || {});
+        } else {
+          setSuggestions(data.suggestions || {});
+          setAgentSuggestions([]);
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("[useSuggestions] Fetch error:", err);
+      })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        setIsLoading(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemCount, junkCount]);
 
-    return () => { cancelled = true; };
-  }, [looseEndIds]);
-
-  return { suggestions, isLoading };
+  return { suggestions, agentSuggestions, isLoading };
 }

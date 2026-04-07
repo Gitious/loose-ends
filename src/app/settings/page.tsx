@@ -14,7 +14,7 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-le-void text-le-text">
       <Nav />
 
-      <main className="max-w-3xl mx-auto px-6 py-12 space-y-12">
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-12 space-y-10 sm:space-y-12">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -33,13 +33,17 @@ export default function SettingsPage() {
         </Suspense>
 
         {/* What I've Learned */}
-        <MemoryPanel />
+        <div id="memory">
+          <MemoryPanel />
+        </div>
 
         {/* Agent Permissions (FGA) */}
         <AgentPermissions />
 
         {/* Activity Log (Audit Trail) */}
-        <AuditLog />
+        <div id="audit">
+          <AuditLog />
+        </div>
 
         {/* About / Token Vault */}
         <motion.section

@@ -7,15 +7,16 @@ import { motion, AnimatePresence } from "framer-motion";
 interface Memory {
   id: string;
   content: string;
+  memo?: string;
   source: string;
   timestamp?: string;
   createdAt?: string;
 }
 
 const SOURCE_COLOR: Record<string, string> = {
-  gmail: "bg-blue-400",
-  calendar: "bg-emerald-400",
-  github: "bg-gray-400",
+  gmail: "bg-red-400",
+  calendar: "bg-blue-400",
+  github: "bg-orange-400",
   slack: "bg-purple-400",
   chat: "bg-le-accent",
   agent: "bg-le-accent",
@@ -69,7 +70,7 @@ export default function AgentInsight() {
           <span className="flex-1 min-w-0 text-xs text-le-muted truncate">
             <span className="text-le-text/70 font-medium">{memories.length} patterns learned</span>
             <span className="text-le-muted/40"> — </span>
-            <span className="text-le-muted/60">{memories[0].content}</span>
+            <span className="text-le-muted/60">{memories[0].memo || memories[0].content}</span>
           </span>
           <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-le-muted/30 shrink-0">
             <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 011.06 0L8 8.94l2.72-2.72a.75.75 0 111.06 1.06l-3.25 3.25a.75.75 0 01-1.06 0L4.22 7.28a.75.75 0 010-1.06z" clipRule="evenodd" />
@@ -88,7 +89,7 @@ export default function AgentInsight() {
               <span className="text-xs font-medium text-le-text/80">{memories.length} patterns learned</span>
             </div>
             <div className="flex items-center gap-2">
-              <Link href="/settings" className="text-[10px] text-le-muted/40 hover:text-le-accent transition-colors">
+              <Link href="/settings#memory" className="text-[10px] text-le-muted/40 hover:text-le-accent transition-colors">
                 Manage
               </Link>
               <button
@@ -113,11 +114,11 @@ export default function AgentInsight() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: i * 0.03 }}
-                    className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-le-elevated/30 transition-colors"
+                    className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 hover:bg-le-elevated/30 transition-colors"
                   >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
-                    <p className="flex-1 min-w-0 text-xs text-le-text/70 truncate">{mem.content}</p>
-                    {ts && <span className="text-[10px] text-le-muted/30 shrink-0 tabular-nums">{relativeTime(ts)}</span>}
+                    <span className="text-xs text-le-text/60 truncate flex-1 min-w-0">{mem.memo || mem.content}</span>
+                    {ts && <span className="text-[10px] text-le-muted/25 shrink-0 tabular-nums">{relativeTime(ts)}</span>}
                   </motion.div>
                 );
               })}

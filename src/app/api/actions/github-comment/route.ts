@@ -10,10 +10,26 @@ export async function POST(req: Request) {
   const userId = session.user?.sub || session.user?.email || "anonymous";
   const allowed = await checkPermission(userId, "github", "can_comment");
 
-  const { owner, repo, number, body } = await req.json();
+  let parsed: unknown;
+  try {
+    parsed = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  if (!/^[a-zA-Z0-9._-]+$/.test(owner) || !/^[a-zA-Z0-9._-]+$/.test(repo) || isNaN(Number(number))) {
+  const { owner, repo, number, body } = parsed as Record<string, unknown>;
+
+  if (
+    typeof owner !== "string" || typeof repo !== "string" ||
+    typeof body !== "string" || !number ||
+    !/^[a-zA-Z0-9._-]+$/.test(owner) || !/^[a-zA-Z0-9._-]+$/.test(repo) ||
+    isNaN(Number(number))
+  ) {
     return Response.json({ error: "Invalid parameters" }, { status: 400 });
+  }
+
+  if (body.length > 65536) {
+    return Response.json({ error: "Comment body too long" }, { status: 400 });
   }
 
   const target = `${owner}/${repo}#${number}`;
@@ -79,7 +95,7 @@ export async function POST(req: Request) {
       permitted: true,
       success: false,
     });
-    return Response.json({ error: `Failed to post comment: ${err}` }, { status: 500 });
+    return Response.json({ error: "Failed to post comment" }, { status: 500 });
   }
 
   const comment = await res.json();

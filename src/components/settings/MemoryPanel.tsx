@@ -6,20 +6,21 @@ import { useEffect, useState, useCallback } from "react";
 interface Memory {
   id: string;
   content: string;
+  memo: string;
   source: "gmail" | "calendar" | "github" | "slack" | "chat" | "agent";
   createdAt: string;
 }
 
 const SOURCE_STYLES: Record<
   Memory["source"],
-  { dot: string; label: string }
+  { dot: string; text: string; label: string }
 > = {
-  gmail: { dot: "bg-red-400", label: "Gmail" },
-  calendar: { dot: "bg-blue-400", label: "Calendar" },
-  github: { dot: "bg-gray-400", label: "GitHub" },
-  slack: { dot: "bg-purple-400", label: "Slack" },
-  chat: { dot: "bg-le-accent", label: "Chat" },
-  agent: { dot: "bg-le-accent", label: "Agent" },
+  gmail: { dot: "bg-red-400", text: "text-red-400/50", label: "Gmail" },
+  calendar: { dot: "bg-blue-400", text: "text-blue-400/50", label: "Calendar" },
+  github: { dot: "bg-orange-400", text: "text-orange-400/50", label: "GitHub" },
+  slack: { dot: "bg-purple-400", text: "text-purple-400/50", label: "Slack" },
+  chat: { dot: "bg-le-accent", text: "text-le-accent/50", label: "Chat" },
+  agent: { dot: "bg-le-accent", text: "text-le-accent/50", label: "Agent" },
 };
 
 function relativeTime(iso: string): string {
@@ -130,9 +131,9 @@ export default function MemoryPanel() {
           No memories yet. Scan your services and the agent will learn your patterns.
         </div>
       ) : (
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-le-border/20 bg-le-void/60">
+        <div className="max-h-[420px] overflow-y-auto rounded-lg border border-le-border/10 bg-le-void/30">
           <AnimatePresence mode="popLayout">
-            {memories.map((memory, i) => {
+            {memories.map((memory) => {
               const style = SOURCE_STYLES[memory.source] ?? SOURCE_STYLES.chat;
               return (
                 <motion.div
@@ -141,21 +142,15 @@ export default function MemoryPanel() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  className={`group flex items-start gap-2.5 px-3 py-2.5 border-b border-le-border/8 transition-colors hover:bg-le-elevated/20 ${
-                    i % 2 === 0 ? "" : "bg-le-elevated/8"
-                  }`}
+                  className="group flex items-center gap-3 px-3.5 py-2.5 border-b border-le-border/6 last:border-b-0 transition-colors hover:bg-le-elevated/10"
                 >
-                  <span className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-le-text/80 leading-relaxed">{memory.content}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] font-mono text-le-muted/50">{style.label}</span>
-                      <span className="text-[10px] text-le-muted/30">{relativeTime(memory.createdAt)}</span>
-                    </div>
-                  </div>
+                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} />
+                  <p className="text-xs text-le-text/80 leading-relaxed flex-1 min-w-0">{memory.content}</p>
+                  <span className={`text-[10px] shrink-0 ${style.text}`}>{style.label}</span>
+                  <span className="text-[10px] text-le-muted/35 shrink-0 tabular-nums">{relativeTime(memory.createdAt)}</span>
                   <button
                     onClick={() => handleDelete(memory.id)}
-                    className="shrink-0 mt-0.5 h-5 w-5 flex items-center justify-center rounded text-le-muted/30 opacity-0 transition-all group-hover:opacity-100 hover:bg-le-red/10 hover:text-le-red"
+                    className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-le-muted/15 opacity-0 transition-all group-hover:opacity-100 hover:bg-le-red/10 hover:text-le-red"
                     aria-label="Delete"
                   >
                     <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">

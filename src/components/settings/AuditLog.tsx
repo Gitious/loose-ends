@@ -101,7 +101,7 @@ export default function AuditLog() {
         <div className="max-h-96 overflow-y-auto rounded-lg border border-le-border/20 bg-le-void/60">
           {Object.entries(grouped).map(([date, items]) => (
             <div key={date}>
-              <div className="sticky top-0 z-10 bg-le-surface/90 backdrop-blur-sm px-3 py-1.5 border-b border-le-border/15">
+              <div className="sticky top-0 z-10 bg-le-surface/90 backdrop-blur-sm px-3 py-2 border-b border-le-border/15">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-le-muted/50">{date}</span>
               </div>
               {items.map((entry, i) => {
@@ -109,15 +109,17 @@ export default function AuditLog() {
                 return (
                   <div
                     key={entry.id}
-                    className={`flex items-center gap-2.5 px-3 py-1.5 text-[11px] border-b border-le-border/8 transition-colors hover:bg-le-elevated/20 ${
+                    className={`flex items-center gap-3 px-3 py-2 text-xs border-b border-le-border/8 transition-colors hover:bg-le-elevated/20 ${
                       i % 2 === 0 ? "" : "bg-le-elevated/8"
                     }`}
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${status.dot}`} />
-                    <span className="font-mono text-le-muted/50 shrink-0 tabular-nums">{formatTime(entry.timestamp)}</span>
-                    <span className="font-mono text-le-text/80 shrink-0">{entry.action}</span>
-                    <span className="text-le-muted/60 truncate flex-1 min-w-0">{entry.details || entry.target || ""}</span>
-                    <span className={`font-mono font-medium shrink-0 ${status.text}`}>{status.label}</span>
+                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ring-2 ${status.dot} ${status.dot === "bg-le-red" ? "ring-le-red/20" : "ring-emerald-400/20"}`} />
+                    <span className="font-mono text-le-muted/60 shrink-0 tabular-nums w-16">{formatTime(entry.timestamp)}</span>
+                    <span className="font-mono text-le-text/90 shrink-0 font-medium">{entry.action}</span>
+                    <span className="text-le-muted/50 truncate flex-1 min-w-0">{entry.details || entry.target || ""}</span>
+                    <span className={`font-mono text-[10px] font-semibold uppercase tracking-wide shrink-0 rounded-full px-2 py-0.5 ${
+                      status.dot === "bg-le-red" ? "bg-le-red/10 text-le-red" : "bg-emerald-400/10 text-emerald-400"
+                    }`}>{status.label}</span>
                   </div>
                 );
               })}
