@@ -13,6 +13,7 @@ import LooseEndCard from "./LooseEndCard";
 import SuggestionTray from "./SuggestionTray";
 import ServiceTile from "./ServiceTile";
 import ChatDrawer from "./ChatDrawer";
+import { buildGoogleConnectUrl } from "@/lib/google-scopes";
 
 type FilterType = "all" | "email" | "github" | "calendar" | "slack";
 
@@ -295,6 +296,7 @@ export default function DashboardShell({
     services,
     servicesLoaded,
     denied,
+    needsReconnect,
     scan,
     lastScannedAt,
     dismissItem,
@@ -835,6 +837,23 @@ export default function DashboardShell({
           }
           scanScope={filter === "all" ? undefined : filter}
         />
+
+        {(needsReconnect.includes("google") || (servicesLoaded && services.google === false)) && (
+          <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-le-text">Reconnect Google to enable Gmail & Calendar</div>
+              <div className="mt-1 text-sm text-le-muted">
+                We don&apos;t have the permissions needed to read your inbox or calendar. Click to grant access — takes one tap.
+              </div>
+            </div>
+            <a
+              href={buildGoogleConnectUrl("/dashboard")}
+              className="shrink-0 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
+            >
+              Reconnect Google
+            </a>
+          </div>
+        )}
 
         <div className="mt-5 flex items-center gap-2">
           <div className="flex-1">

@@ -14,6 +14,7 @@ interface ScanResult {
   services: Record<string, boolean>;
   servicesLoaded: boolean;
   denied: string[];
+  needsReconnect: string[];
   scan: (only?: string) => Promise<void>;
   lastScannedAt: Date | null;
   removeItem: (id: string) => void;
@@ -37,6 +38,7 @@ export function useScan(): ScanResult {
   const [services, setServices] = useState<Record<string, boolean>>({});
   const [servicesLoaded, setServicesLoaded] = useState(false);
   const [denied, setDenied] = useState<string[]>([]);
+  const [needsReconnect, setNeedsReconnect] = useState<string[]>([]);
   const [lastScannedAt, setLastScannedAt] = useState<Date | null>(null);
   const [autonomousStatus] = useState<"idle" | "pending" | "done">("idle");
   const hasFetchedStatus = useRef(false);
@@ -89,6 +91,7 @@ export function useScan(): ScanResult {
       setErrors(data.errors || {});
       if (data.services) setServices(data.services);
       setDenied(data.denied || []);
+      setNeedsReconnect(data.needsReconnect || []);
       setLastScannedAt(new Date());
       lastScanTimeRef.current = Date.now();
       // Cache results so navigation doesn't trigger rescan
@@ -231,5 +234,5 @@ export function useScan(): ScanResult {
     setLooseEnds((prev) => [...prev, rescued]);
   }, []);
 
-  return { looseEnds, junkEmails, isScanning, errors, services, servicesLoaded, denied, scan, lastScannedAt, removeItem, dismissItem, clearJunk, rescueJunkEmail, autonomousStatus, agentSuggestions, textSuggestions, suggestionsLoading };
+  return { looseEnds, junkEmails, isScanning, errors, services, servicesLoaded, denied, needsReconnect, scan, lastScannedAt, removeItem, dismissItem, clearJunk, rescueJunkEmail, autonomousStatus, agentSuggestions, textSuggestions, suggestionsLoading };
 }

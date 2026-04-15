@@ -748,10 +748,17 @@ async function scan(only?: string | null) {
   const services: Record<string, boolean> = { google: false, github: false, slack: false };
   const denied: string[] = [];
 
+  const needsReconnect: string[] = [];
+
   // Get tokens and permissions in parallel
   const [permissions, googleTokenResult, githubTokenResult, slackTokenResult] = await Promise.all([
     loadPermissions(userId),
-    auth0.getAccessTokenForConnection({ connection: "google-oauth2" }).catch(() => null),
+    auth0.getAccessTokenForConnection({ connection: "google-oauth2" }).catch((e) => {
+      console.error("[scan] Google Token Vault failed:", e?.message || e);
+      errors.google = "reconnect_required";
+      needsReconnect.push("google");
+      return null;
+    }),
     auth0.getAccessTokenForConnection({ connection: "github" }).catch(() => null),
     auth0.getAccessTokenForConnection({ connection: "sign-in-with-slack" }).catch(() => null),
   ]);
@@ -849,7 +856,7 @@ async function scan(only?: string | null) {
   const plate = buildPlate(allLooseEnds, junkEmails);
   savePlate(userId, plate).catch((err) => console.error("[Plate] Save error:", err));
 
-  return Response.json({ looseEnds: allLooseEnds, junkEmails, errors, services, denied });
+  return Response.json({ looseEnds: allLooseEnds, junkEmails, errors, services, denied, needsReconnect });
 }
 
 /**

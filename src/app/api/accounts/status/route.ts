@@ -37,8 +37,11 @@ export async function GET() {
     isConnectionActive("sign-in-with-slack"),
   ]);
 
+  // `google` reflects Token Vault truth only — primary login via Google SSO does
+  // not populate Token Vault, so a Google-logged-in user without a separate
+  // connected-account grant still has no Gmail/Calendar access.
   return Response.json({
-    google: google || primaryGoogle,
+    google,
     github,
     slack,
     loginProvider: primaryGitHub ? "github" : primaryGoogle ? "google" : "other",
